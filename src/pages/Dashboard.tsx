@@ -99,12 +99,16 @@ export const Dashboard: React.FC = () => {
       0
     )
     const totalExpenses = expenses.reduce((sum, e) => sum + e.value, 0)
-    const totalCost = sales.reduce((sum, s) => {
-      // We approximate cost from stock average_cost stored at sale time
-      // For dashboard, we use unit_price * 0.6 as estimation if no cost data
-      return sum
+    // Lucro bruto = receita - CMV (custo médio do estoque no momento da venda)
+    // Como não há snapshot de custo por venda, usamos average_cost atual do stock
+    const totalCOGS = sales.reduce((sum, s) => {
+      const stockItem = stock.find(
+        (st) => st.product_id === s.product_id && st.size === s.size
+      )
+      const cost = stockItem ? stockItem.average_cost : 0
+      return sum + s.quantity * cost
     }, 0)
-    const totalProfit = totalRevenue - totalExpenses
+    const totalProfit = totalRevenue - totalCOGS - totalExpenses
 
     return {
       totalRevenue,
@@ -112,7 +116,7 @@ export const Dashboard: React.FC = () => {
       totalSales: sales.length,
       totalExpenses,
     }
-  }, [sales, expenses])
+  }, [sales, expenses, stock])
 
   // Chart data - group by day
   const chartData = useMemo((): ChartDataPoint[] => {
