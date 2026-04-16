@@ -8,7 +8,7 @@ import { Modal } from '@/components/Modal'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { EmptyState } from '@/components/EmptyState'
 import { PageLoading } from '@/components/LoadingSpinner'
-import type { SaleFormData, Size, SaleStatus } from '@/types'
+import type { SaleFormData, Size } from '@/types'
 import { SIZES, PAYMENT_METHODS, SALE_STATUSES } from '@/types'
 import { stockService } from '@/services/stockService'
 
@@ -17,10 +17,12 @@ const formatCurrency = (value: number) =>
 
 const emptySaleForm: SaleFormData = {
   product_id: '',
-  size: 'M',
-  quantity: 1,
-  unit_price: 0,
-  discount: 0,
+  tamanho: 'M',
+  quantidade: '',
+  preco_venda: '',
+  desconto: '',
+  frete_cobrado: '',
+  frete_custo: '',
   customer_name: '',
   customer_phone: '',
   payment_method: 'pix',
@@ -42,16 +44,24 @@ export const Sales: React.FC = () => {
     fetchProducts()
   }, [fetchSales, fetchProducts])
 
-  // Check stock availability when product/size changes
+  // Check stock availability when product/tamanho changes
   useEffect(() => {
-    if (form.product_id && form.size) {
-      stockService.getStockForSale(form.product_id, form.size).then((stock) => {
-        setAvailableQty(stock?.quantity ?? 0)
+    if (form.product_id && form.tamanho) {
+      stockService.getStockForSale(form.product_id, form.tamanho).then((stock) => {
+        setAvailableQty(stock?.quantidade ?? 0)
       })
     } else {
       setAvailableQty(null)
     }
-  }, [form.product_id, form.size])
+  }, [form.product_id, form.tamanho])
+
+  const parseNum = (v: string | number) => Number(String(v).replace(/\./g, '').replace(',', '.')) || 0
+  const parsedQty = parseNum(form.quantidade)
+  const parsedPrice = parseNum(form.preco_venda)
+  const parsedDiscount = parseNum(form.desconto || 0)
+  const parsedFreteCobrado = parseNum(form.frete_cobrado || 0)
+  const parsedFreteCusto = parseNum(form.frete_custo || 0)
+  const parsedLucroFrete = parsedFreteCobrado - parsedFreteCusto
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -59,15 +69,15 @@ export const Sales: React.FC = () => {
       setError('Selecione um produto')
       return
     }
-    if (form.quantity <= 0) {
+    if (parsedQty <= 0) {
       setError('Quantidade deve ser maior que zero')
       return
     }
-    if (form.unit_price <= 0) {
+    if (parsedPrice <= 0) {
       setError('Preço unitário deve ser maior que zero')
       return
     }
-    if (availableQty !== null && form.quantity > availableQty) {
+    if (availableQty !== null && parsedQty > availableQty) {
       setError(`Estoque insuficiente! Disponível: ${availableQty} unidades`)
       return
     }
@@ -97,7 +107,7 @@ export const Sales: React.FC = () => {
     }
   }
 
-  const saleTotal = form.quantity * form.unit_price - form.discount
+  const saleTotal = parsedQty * parsedPrice - parsedDiscount
 
   if (loading && sales.length === 0) return <PageLoading />
 
@@ -117,7 +127,7 @@ export const Sales: React.FC = () => {
 
       {sales.length > 0 ? (
         <div className="table-container overflow-x-auto">
-          <table className="min-w-[800px]">
+          <table className="min-w-[960px]">
             <thead>
               <tr>
                 <th>Produto</th>
@@ -125,6 +135,7 @@ export const Sales: React.FC = () => {
                 <th>Qtd</th>
                 <th>Preço Unit.</th>
                 <th>Desc.</th>
+                <th>Frete Cobrado</th>
                 <th>Total</th>
                 <th>Cliente</th>
                 <th>Pagamento</th>
@@ -135,18 +146,21 @@ export const Sales: React.FC = () => {
             </thead>
             <tbody>
               {sales.map((sale) => {
-                const total = sale.quantity * sale.unit_price - sale.discount
+                const total = sale.quantidade * sale.preco_venda - sale.desconto
                 const statusInfo = SALE_STATUSES.find((s) => s.value === sale.status)
                 return (
                   <tr key={sale.id}>
                     <td className="font-medium text-dark-100">
                       {sale.products?.nome || '—'}
                     </td>
-                    <td><span className="size-badge-active">{sale.size}</span></td>
-                    <td className="font-semibold">{sale.quantity}</td>
-                    <td>{formatCurrency(sale.unit_price)}</td>
+                    <td><span className="size-badge-active">{sale.tamanho}</span></td>
+                    <td className="font-semibold">{sale.quantidade}</td>
+                    <td>{formatCurrency(sale.preco_venda)}</td>
                     <td className="text-danger-400">
-                      {sale.discount > 0 ? `-${formatCurrency(sale.discount)}` : '—'}
+                      {sale.desconto > 0 ? `-${formatCurrency(sale.desconto)}` : '—'}
+                    </td>
+                    <td className="text-brand-400">
+                      {(sale.frete_cobrado ?? 0) > 0 ? formatCurrency(sale.frete_cobrado) : '—'}
                     </td>
                     <td className="font-bold text-success-400">{formatCurrency(total)}</td>
                     <td>
@@ -162,7 +176,7 @@ export const Sales: React.FC = () => {
                     </td>
                     <td>
                       <span className={`badge ${
-                        sale.status === 'completed' ? 'badge-success' : 
+                        sale.status === 'completed' ? 'badge-success' :
                         sale.status === 'pending' ? 'badge-warning' : 'badge-danger'
                       }`}>
                         {statusInfo?.label || sale.status}
@@ -227,19 +241,19 @@ export const Sales: React.FC = () => {
 
           <div>
             <label className="input-label">Tamanho *</label>
-            <div className="flex gap-2">
-              {SIZES.map((size) => (
+            <div className="flex gap-2 flex-wrap">
+              {SIZES.map((t) => (
                 <button
-                  key={size}
+                  key={t}
                   type="button"
-                  onClick={() => setForm({ ...form, size: size as Size })}
-                  className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${
-                    form.size === size
+                  onClick={() => setForm({ ...form, tamanho: t as Size })}
+                  className={`px-3 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${
+                    form.tamanho === t
                       ? 'bg-brand-600 text-white shadow-md shadow-brand-600/20'
                       : 'bg-dark-800/60 text-dark-400 border border-dark-700/50 hover:bg-dark-700/60'
                   }`}
                 >
-                  {size}
+                  {t}
                 </button>
               ))}
             </div>
@@ -254,39 +268,66 @@ export const Sales: React.FC = () => {
             <div>
               <label className="input-label">Quantidade *</label>
               <input
-                type="number"
-                min="1"
-                max={availableQty ?? undefined}
-                value={form.quantity}
-                onChange={(e) => setForm({ ...form, quantity: parseInt(e.target.value) || 0 })}
+                type="text"
+                value={form.quantidade}
+                onChange={(e) => setForm({ ...form, quantidade: e.target.value })}
                 className="input-field"
+                placeholder="Ex: 5"
               />
             </div>
             <div>
               <label className="input-label">Preço Unit. (R$) *</label>
               <input
-                type="number"
-                min="0.01"
-                step="0.01"
-                value={form.unit_price || ''}
-                onChange={(e) => setForm({ ...form, unit_price: parseFloat(e.target.value) || 0 })}
+                type="text"
+                value={form.preco_venda}
+                onChange={(e) => setForm({ ...form, preco_venda: e.target.value })}
                 className="input-field"
-                placeholder="0,00"
+                placeholder="Ex: 35,90"
               />
             </div>
             <div>
               <label className="input-label">Desconto (R$)</label>
               <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.discount || ''}
-                onChange={(e) => setForm({ ...form, discount: parseFloat(e.target.value) || 0 })}
+                type="text"
+                value={form.desconto}
+                onChange={(e) => setForm({ ...form, desconto: e.target.value })}
                 className="input-field"
-                placeholder="0,00"
+                placeholder="Ex: 10,00"
               />
             </div>
           </div>
+
+          {/* Frete */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="input-label">Frete Cobrado do Cliente (R$)</label>
+              <input
+                type="text"
+                value={form.frete_cobrado}
+                onChange={(e) => setForm({ ...form, frete_cobrado: e.target.value })}
+                className="input-field"
+                placeholder="Ex: 25,00"
+              />
+            </div>
+            <div>
+              <label className="input-label">Custo do Frete (R$)</label>
+              <input
+                type="text"
+                value={form.frete_custo}
+                onChange={(e) => setForm({ ...form, frete_custo: e.target.value })}
+                className="input-field"
+                placeholder="Ex: 18,00"
+              />
+            </div>
+          </div>
+          {(parsedFreteCobrado > 0 || parsedFreteCusto > 0) && (
+            <div className="p-3 rounded-xl bg-brand-500/10 border border-brand-500/20 flex items-center justify-between text-sm">
+              <span className="text-dark-400">Lucro do frete:</span>
+              <span className={`font-semibold ${parsedLucroFrete >= 0 ? 'text-success-400' : 'text-danger-400'}`}>
+                {formatCurrency(parsedLucroFrete)}
+              </span>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -335,10 +376,10 @@ export const Sales: React.FC = () => {
                     {formatCurrency(saleTotal)}
                   </p>
                 </div>
-                {form.discount > 0 && (
+                {parsedDiscount > 0 && (
                   <div className="text-right">
-                    <p className="text-xs text-dark-500">Subtotal: {formatCurrency(form.quantity * form.unit_price)}</p>
-                    <p className="text-xs text-danger-400">Desconto: -{formatCurrency(form.discount)}</p>
+                    <p className="text-xs text-dark-500">Subtotal: {formatCurrency(parsedQty * parsedPrice)}</p>
+                    <p className="text-xs text-danger-400">Desconto: -{formatCurrency(parsedDiscount)}</p>
                   </div>
                 )}
               </div>

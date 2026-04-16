@@ -6,6 +6,7 @@ import {
   Receipt,
   Warehouse,
   AlertTriangle,
+  Truck,
 } from 'lucide-react'
 import {
   AreaChart,
@@ -95,28 +96,30 @@ export const Dashboard: React.FC = () => {
 
   const metrics = useMemo(() => {
     const totalRevenue = sales.reduce(
-      (sum, s) => sum + s.quantity * s.unit_price - s.discount,
+      (sum, s) => sum + s.quantidade * s.preco_venda - s.desconto,
       0
     )
     const totalExpenses = expenses.reduce((sum, e) => sum + e.value, 0)
-    // Lucro bruto = receita - CMV (custo médio do estoque no momento da venda)
-    // Como não há snapshot de custo por venda, usamos average_cost atual do stock
-    const totalCOGS = sales.reduce((sum, s) => {
-      const stockItem = stock.find(
-        (st) => st.product_id === s.product_id && st.size === s.size
-      )
-      const cost = stockItem ? stockItem.average_cost : 0
-      return sum + s.quantity * cost
-    }, 0)
+    // Lucro = receita - CMV (custo total registrado via FIFO) - despesas
+    const totalCOGS = sales.reduce((sum, s) => sum + (s.custo_unitario_snapshot ?? 0), 0)
     const totalProfit = totalRevenue - totalCOGS - totalExpenses
+
+    // Frete
+    const totalFreteCliente = sales.reduce((sum, s) => sum + (s.frete_cobrado ?? 0), 0)
+    const totalLucroFrete = sales.reduce(
+      (sum, s) => sum + ((s.frete_cobrado ?? 0) - (s.frete_custo ?? 0)),
+      0
+    )
 
     return {
       totalRevenue,
       totalProfit,
       totalSales: sales.length,
       totalExpenses,
+      totalFreteCliente,
+      totalLucroFrete,
     }
-  }, [sales, expenses, stock])
+  }, [sales, expenses])
 
   // Chart data - group by day
   const chartData = useMemo((): ChartDataPoint[] => {
@@ -127,7 +130,7 @@ export const Dashboard: React.FC = () => {
       if (!grouped[date]) {
         grouped[date] = { date, revenue: 0, profit: 0, expenses: 0 }
       }
-      grouped[date].revenue += sale.quantity * sale.unit_price - sale.discount
+      grouped[date].revenue += sale.quantidade * sale.preco_venda - sale.desconto
     })
 
     expenses.forEach((expense) => {
@@ -196,6 +199,24 @@ export const Dashboard: React.FC = () => {
           value={formatCurrency(totalValue)}
           icon={<Warehouse className="w-5 h-5 text-warning-400" />}
           gradient="from-warning-600/20 to-warning-500/10"
+        />
+      </div>
+
+      {/* Frete Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <StatCard
+          title="Frete Pago pelos Clientes"
+          value={formatCurrency(metrics.totalFreteCliente)}
+          subtitle="total cobrado de clientes"
+          icon={<Truck className="w-5 h-5 text-brand-400" />}
+          gradient="from-brand-600/20 to-brand-500/10"
+        />
+        <StatCard
+          title="Lucro do Frete"
+          value={formatCurrency(metrics.totalLucroFrete)}
+          subtitle="frete cobrado − custo do frete"
+          icon={<TrendingUp className="w-5 h-5 text-success-400" />}
+          gradient="from-success-600/20 to-success-500/10"
         />
       </div>
 
@@ -310,11 +331,11 @@ export const Dashboard: React.FC = () => {
                     {item.products.nome}
                   </p>
                   <p className="text-xs text-dark-500">
-                    Tamanho {item.size}
+                    Tamanho {item.tamanho}
                   </p>
                 </div>
                 <span className="badge-warning">
-                  {item.quantity} un.
+                  {item.quantidade} un.
                 </span>
               </div>
             ))}

@@ -2,9 +2,9 @@
 // TYPES - Sistema ERP Atacado
 // ============================================
 
-export type Size = 'P' | 'M' | 'G' | 'GG'
+export type Size = 'P' | 'M' | 'G' | 'GG' | 'G1' | 'G2' | 'G3'
 
-export const SIZES: Size[] = ['P', 'M', 'G', 'GG']
+export const SIZES: Size[] = ['P', 'M', 'G', 'GG', 'G1', 'G2', 'G3']
 
 export type PaymentMethod = 'dinheiro' | 'pix' | 'cartao_credito' | 'cartao_debito' | 'boleto' | 'transferencia'
 
@@ -47,34 +47,36 @@ export interface Product {
   nome: string
   modelo: string
   cor: string
-  sku: string
   created_at: string
 }
 
 export interface Stock {
   id: string
   product_id: string
-  size: Size
-  quantity: number
-  average_cost: number
+  tamanho: Size
+  quantidade: number
 }
 
 export interface StockEntry {
   id: string
   product_id: string
-  size: Size
-  quantity: number
-  unit_cost: number
+  tamanho: Size
+  quantidade: number
+  remaining_quantity: number
+  custo_unitario: number
   created_at: string
 }
 
 export interface Sale {
   id: string
   product_id: string
-  size: Size
-  quantity: number
-  unit_price: number
-  discount: number
+  tamanho: Size
+  quantidade: number
+  preco_venda: number
+  desconto: number
+  custo_unitario_snapshot: number
+  frete_cobrado: number
+  frete_custo: number
   customer_name: string
   customer_phone: string
   payment_method: PaymentMethod
@@ -110,22 +112,23 @@ export interface ProductFormData {
   nome: string
   modelo: string
   cor: string
-  sku: string
 }
 
 export interface StockEntryFormData {
   product_id: string
-  size: Size
-  quantity: number
-  unit_cost: number
+  tamanho: Size
+  quantidade: number | string
+  custo_unitario: number | string
 }
 
 export interface SaleFormData {
   product_id: string
-  size: Size
-  quantity: number
-  unit_price: number
-  discount: number
+  tamanho: Size
+  quantidade: number | string
+  preco_venda: number | string
+  desconto: number | string
+  frete_cobrado: number | string
+  frete_custo: number | string
   customer_name: string
   customer_phone: string
   payment_method: PaymentMethod
