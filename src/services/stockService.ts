@@ -232,11 +232,16 @@ export const stockService = {
   },
 
   async getTotalStockValue(): Promise<number> {
+    // Soma (remaining_quantity * custo_unitario) de todas as entradas,
+    // evitando duplicidade — considera apenas o estoque ainda disponível por entrada.
     const { data, error } = await supabase
-      .from('stock')
-      .select('quantidade')
+      .from('stock_entries')
+      .select('remaining_quantity, custo_unitario')
 
     if (error) throw error
-    return (data || []).reduce((total, item) => total + (item.quantidade ?? 0), 0)
+    return (data || []).reduce(
+      (total, item) => total + (item.remaining_quantity ?? 0) * (item.custo_unitario ?? 0),
+      0
+    )
   },
 }
