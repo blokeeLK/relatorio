@@ -114,6 +114,115 @@ export const saleService = {
     return saleData
   },
 
+  async update(id: string, sale: SaleFormData): Promise<void> {
+    // Strategy: reverse the original sale (restore stock), then apply a new one.
+    const { data: original, error: getErr } = await supabase
+      .from('sales')
+      .select('*')
+      .eq('id', id)
+      .single()
+    if (getErr) throw getErr
+    if (!original) throw new Error('Venda não encontrada.')
+
+    // 1. Restore stock from original (if it was completed)
+    let restoreEntryId: string | null = null
+    if (original.status === 'completed') {
+      const restoreUnitCost =
+        original.quantidade > 0 ? original.custo_unitario_snapshot / original.quantidade : 0
+      const { data: restored, error: entryError } = await supabase
+        .from('stock_entries')
+        .insert({
+          product_id: original.product_id,
+          tamanho: original.tamanho,
+          quantidade: original.quantidade,
+          remaining_quantity: original.quantidade,
+          custo_unitario: restoreUnitCost,
+        })
+        .select()
+        .single()
+      if (entryError) throw entryError
+      restoreEntryId = restored?.id ?? null
+      await stockService.recomputeStock(original.product_id, original.tamanho)
+    }
+
+    try {
+      const quantidade = normalizeQuantity(sale.quantidade)
+      const preco_venda = normalizeMoney(sale.preco_venda)
+      const desconto = normalizeMoney(sale.desconto || 0)
+      const frete_cobrado = normalizeMoney(sale.frete_cobrado || 0)
+      const frete_custo = normalizeMoney(sale.frete_custo || 0)
+
+      if (quantidade <= 0) throw new Error('Quantidade inválida para venda.')
+      if (preco_venda < 0) throw new Error('Preço de venda inválido.')
+
+      // Check available stock again (now includes restored units)
+      const stock = await stockService.getStockForSale(sale.product_id, sale.tamanho)
+      if (!stock || stock.quantidade < quantidade) {
+        const available = stock?.quantidade || 0
+        throw new Error(`Estoque insuficiente! Disponível: ${available} unidades`)
+      }
+
+      // FIFO consumption
+      const { data: entries, error: entriesError } = await supabase
+        .from('stock_entries')
+        .select('*')
+        .eq('product_id', sale.product_id)
+        .eq('tamanho', sale.tamanho)
+        .gt('remaining_quantity', 0)
+        .order('created_at', { ascending: true })
+      if (entriesError) throw entriesError
+      if (!entries || entries.length === 0) throw new Error('Falha de integridade: sem entradas para consumir.')
+
+      let qtyToFulfill = quantidade
+      let computedTotalCost = 0
+      const updates: { id: string; remaining_quantity: number }[] = []
+      for (const entry of entries) {
+        if (qtyToFulfill <= 0) break
+        const consumed = Math.min(entry.remaining_quantity, qtyToFulfill)
+        computedTotalCost += consumed * entry.custo_unitario
+        qtyToFulfill -= consumed
+        updates.push({ id: entry.id, remaining_quantity: entry.remaining_quantity - consumed })
+      }
+      if (qtyToFulfill > 0) throw new Error('Estoque das entradas incompatível com o total verificado.')
+
+      for (const upd of updates) {
+        const { error: updErr } = await supabase
+          .from('stock_entries')
+          .update({ remaining_quantity: upd.remaining_quantity })
+          .eq('id', upd.id)
+        if (updErr) throw updErr
+      }
+
+      const { error: saleError } = await supabase
+        .from('sales')
+        .update({
+          product_id: sale.product_id,
+          tamanho: sale.tamanho,
+          quantidade,
+          preco_venda,
+          desconto,
+          custo_unitario_snapshot: computedTotalCost,
+          frete_cobrado,
+          frete_custo,
+          customer_name: sale.customer_name?.trim() || '',
+          customer_phone: sale.customer_phone?.trim() || '',
+          payment_method: sale.payment_method,
+          status: 'completed',
+        })
+        .eq('id', id)
+      if (saleError) throw saleError
+
+      await stockService.recomputeStock(sale.product_id, sale.tamanho)
+    } catch (err) {
+      // Rollback: remove the restore entry to avoid phantom stock
+      if (restoreEntryId) {
+        await supabase.from('stock_entries').delete().eq('id', restoreEntryId)
+        await stockService.recomputeStock(original.product_id, original.tamanho)
+      }
+      throw err
+    }
+  },
+
   async updateStatus(id: string, status: string): Promise<void> {
     const { error } = await supabase
       .from('sales')
@@ -143,6 +252,7 @@ export const saleService = {
           custo_unitario: restoreUnitCost,
         })
       if (entryError) throw entryError
+      await stockService.recomputeStock(sale.product_id, sale.tamanho)
     }
 
     const { error } = await supabase.from('sales').delete().eq('id', id)

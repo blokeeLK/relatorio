@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react'
-import { Plus, PackagePlus } from 'lucide-react'
+import { Plus, PackagePlus, Pencil, Trash2 } from 'lucide-react'
 import { format } from 'date-fns'
 import { useStockStore } from '@/store/useStockStore'
 import { useProductStore } from '@/store/useProductStore'
 import { Modal } from '@/components/Modal'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { EmptyState } from '@/components/EmptyState'
 import { PageLoading } from '@/components/LoadingSpinner'
 import type { StockEntryFormData, Size } from '@/types'
@@ -20,12 +21,15 @@ const emptyForm: StockEntryFormData = {
 }
 
 export const StockEntries: React.FC = () => {
-  const { entries, loading: stockLoading, fetchEntries, addEntry } = useStockStore()
+  const { entries, loading: stockLoading, fetchEntries, addEntry, updateEntry, deleteEntry } = useStockStore()
   const { products, fetchProducts } = useProductStore()
   const [modalOpen, setModalOpen] = useState(false)
   const [form, setForm] = useState<StockEntryFormData>(emptyForm)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [deleteId, setDeleteId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   useEffect(() => {
     fetchEntries()
@@ -50,13 +54,41 @@ export const StockEntries: React.FC = () => {
     setSaving(true)
     setError(null)
     try {
-      await addEntry(form)
+      if (editingId) {
+        await updateEntry(editingId, form)
+      } else {
+        await addEntry(form)
+      }
       setModalOpen(false)
       setForm(emptyForm)
+      setEditingId(null)
     } catch (err) {
       setError((err as Error).message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const openEdit = (entry: typeof entries[number]) => {
+    setEditingId(entry.id)
+    setForm({
+      product_id: entry.product_id,
+      tamanho: entry.tamanho,
+      quantidade: String(entry.quantidade),
+      custo_unitario: String(entry.custo_unitario),
+    })
+    setError(null)
+    setModalOpen(true)
+  }
+
+  const handleDelete = async () => {
+    if (!deleteId) return
+    try {
+      await deleteEntry(deleteId)
+      setDeleteId(null)
+      setDeleteError(null)
+    } catch (err) {
+      setDeleteError((err as Error).message)
     }
   }
 
@@ -68,7 +100,7 @@ export const StockEntries: React.FC = () => {
         <p className="text-dark-400 text-sm">
           {entries.length} entrada(s) registrada(s)
         </p>
-        <button onClick={() => { setForm(emptyForm); setError(null); setModalOpen(true) }} className="btn-primary" id="btn-add-entry">
+        <button onClick={() => { setForm(emptyForm); setEditingId(null); setError(null); setModalOpen(true) }} className="btn-primary" id="btn-add-entry">
           <Plus className="w-4 h-4" />
           Nova Entrada
         </button>
@@ -85,6 +117,7 @@ export const StockEntries: React.FC = () => {
                 <th>Custo Unit.</th>
                 <th>Total</th>
                 <th>Data</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -103,6 +136,24 @@ export const StockEntries: React.FC = () => {
                   </td>
                   <td className="text-dark-400 text-xs">
                     {format(new Date(entry.created_at), 'dd/MM/yyyy HH:mm')}
+                  </td>
+                  <td>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => openEdit(entry)}
+                        className="btn-icon text-brand-400 hover:text-brand-300 hover:bg-brand-500/10"
+                        title="Editar"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => { setDeleteError(null); setDeleteId(entry.id) }}
+                        className="btn-icon text-danger-400 hover:text-danger-300 hover:bg-danger-500/10"
+                        title="Excluir"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -126,8 +177,8 @@ export const StockEntries: React.FC = () => {
       {/* Entry Modal */}
       <Modal
         isOpen={modalOpen}
-        onClose={() => setModalOpen(false)}
-        title="Nova Entrada de Mercadoria"
+        onClose={() => { setModalOpen(false); setEditingId(null) }}
+        title={editingId ? 'Editar Entrada de Mercadoria' : 'Nova Entrada de Mercadoria'}
       >
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
@@ -205,15 +256,24 @@ export const StockEntries: React.FC = () => {
           )}
 
           <div className="flex justify-end gap-3 pt-2">
-            <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">
+            <button type="button" onClick={() => { setModalOpen(false); setEditingId(null) }} className="btn-secondary">
               Cancelar
             </button>
             <button type="submit" className="btn-success" disabled={saving}>
-              {saving ? 'Registrando...' : 'Registrar Entrada'}
+              {saving ? (editingId ? 'Salvando...' : 'Registrando...') : (editingId ? 'Salvar Alterações' : 'Registrar Entrada')}
             </button>
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        isOpen={!!deleteId}
+        onClose={() => { setDeleteId(null); setDeleteError(null) }}
+        onConfirm={handleDelete}
+        title="Excluir Entrada"
+        message={deleteError || 'O estoque será recalculado automaticamente. Deseja continuar?'}
+        confirmText="Excluir"
+      />
     </div>
   )
 }

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Plus, ShoppingCart, Trash2 } from 'lucide-react'
+import { Plus, ShoppingCart, Trash2, Pencil } from 'lucide-react'
 import { format } from 'date-fns'
 import { useSaleStore } from '@/store/useSaleStore'
 import { useProductStore } from '@/store/useProductStore'
@@ -29,11 +29,12 @@ const emptySaleForm: SaleFormData = {
 }
 
 export const Sales: React.FC = () => {
-  const { sales, loading, fetchSales, addSale, deleteSale } = useSaleStore()
+  const { sales, loading, fetchSales, addSale, updateSale, deleteSale } = useSaleStore()
   const { products, fetchProducts } = useProductStore()
   const { fetchStock } = useStockStore()
   const [modalOpen, setModalOpen] = useState(false)
   const [form, setForm] = useState<SaleFormData>(emptySaleForm)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deleteId, setDeleteId] = useState<string | null>(null)
@@ -44,16 +45,30 @@ export const Sales: React.FC = () => {
     fetchProducts()
   }, [fetchSales, fetchProducts])
 
-  // Check stock availability when product/tamanho changes
+  // Check stock availability when product/tamanho changes.
+  // When editing a sale, add the quantity currently reserved by this sale
+  // (if same product/tamanho) to the available stock shown.
   useEffect(() => {
     if (form.product_id && form.tamanho) {
       stockService.getStockForSale(form.product_id, form.tamanho).then((stock) => {
-        setAvailableQty(stock?.quantidade ?? 0)
+        let base = stock?.quantidade ?? 0
+        if (editingId) {
+          const original = sales.find((s) => s.id === editingId)
+          if (
+            original &&
+            original.status === 'completed' &&
+            original.product_id === form.product_id &&
+            original.tamanho === form.tamanho
+          ) {
+            base += original.quantidade
+          }
+        }
+        setAvailableQty(base)
       })
     } else {
       setAvailableQty(null)
     }
-  }, [form.product_id, form.tamanho])
+  }, [form.product_id, form.tamanho, editingId, sales])
 
   const parseNum = (v: string | number) => Number(String(v).replace(/\./g, '').replace(',', '.')) || 0
   const parsedQty = parseNum(form.quantidade)
@@ -85,15 +100,38 @@ export const Sales: React.FC = () => {
     setSaving(true)
     setError(null)
     try {
-      await addSale(form)
+      if (editingId) {
+        await updateSale(editingId, form)
+      } else {
+        await addSale(form)
+      }
       await fetchStock()
       setModalOpen(false)
       setForm(emptySaleForm)
+      setEditingId(null)
     } catch (err) {
       setError((err as Error).message)
     } finally {
       setSaving(false)
     }
+  }
+
+  const openEdit = (sale: typeof sales[number]) => {
+    setEditingId(sale.id)
+    setForm({
+      product_id: sale.product_id,
+      tamanho: sale.tamanho,
+      quantidade: String(sale.quantidade),
+      preco_venda: String(sale.preco_venda),
+      desconto: sale.desconto ? String(sale.desconto) : '',
+      frete_cobrado: sale.frete_cobrado ? String(sale.frete_cobrado) : '',
+      frete_custo: sale.frete_custo ? String(sale.frete_custo) : '',
+      customer_name: sale.customer_name || '',
+      customer_phone: sale.customer_phone || '',
+      payment_method: sale.payment_method,
+    })
+    setError(null)
+    setModalOpen(true)
   }
 
   const handleDelete = async () => {
@@ -116,7 +154,7 @@ export const Sales: React.FC = () => {
       <div className="flex items-center justify-between">
         <p className="text-dark-400 text-sm">{sales.length} venda(s)</p>
         <button
-          onClick={() => { setForm(emptySaleForm); setError(null); setModalOpen(true) }}
+          onClick={() => { setForm(emptySaleForm); setEditingId(null); setError(null); setModalOpen(true) }}
           className="btn-primary"
           id="btn-add-sale"
         >
@@ -186,13 +224,22 @@ export const Sales: React.FC = () => {
                       {format(new Date(sale.created_at), 'dd/MM/yy HH:mm')}
                     </td>
                     <td>
-                      <button
-                        onClick={() => setDeleteId(sale.id)}
-                        className="btn-icon text-danger-400 hover:text-danger-300 hover:bg-danger-500/10"
-                        title="Excluir"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => openEdit(sale)}
+                          className="btn-icon text-brand-400 hover:text-brand-300 hover:bg-brand-500/10"
+                          title="Editar"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => setDeleteId(sale.id)}
+                          className="btn-icon text-danger-400 hover:text-danger-300 hover:bg-danger-500/10"
+                          title="Excluir"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )
@@ -215,7 +262,12 @@ export const Sales: React.FC = () => {
       )}
 
       {/* Sale Modal */}
-      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title="Nova Venda" size="lg">
+      <Modal
+        isOpen={modalOpen}
+        onClose={() => { setModalOpen(false); setEditingId(null) }}
+        title={editingId ? 'Editar Venda' : 'Nova Venda'}
+        size="lg"
+      >
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
             <div className="p-3 rounded-xl bg-danger-500/10 border border-danger-500/20 text-danger-400 text-sm">
@@ -387,11 +439,11 @@ export const Sales: React.FC = () => {
           )}
 
           <div className="flex justify-end gap-3 pt-2">
-            <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">
+            <button type="button" onClick={() => { setModalOpen(false); setEditingId(null) }} className="btn-secondary">
               Cancelar
             </button>
             <button type="submit" className="btn-success" disabled={saving}>
-              {saving ? 'Processando...' : 'Confirmar Venda'}
+              {saving ? 'Processando...' : (editingId ? 'Salvar Alterações' : 'Confirmar Venda')}
             </button>
           </div>
         </form>

@@ -8,6 +8,7 @@ interface SaleStore {
   error: string | null
   fetchSales: () => Promise<void>
   addSale: (data: SaleFormData) => Promise<void>
+  updateSale: (id: string, data: SaleFormData) => Promise<void>
   deleteSale: (id: string) => Promise<void>
   updateSaleStatus: (id: string, status: string) => Promise<void>
 }
@@ -31,6 +32,18 @@ export const useSaleStore = create<SaleStore>((set) => ({
     set({ loading: true, error: null })
     try {
       await saleService.create(data)
+      const sales = await saleService.getAll()
+      set({ sales, loading: false })
+    } catch (err) {
+      set({ error: (err as Error).message, loading: false })
+      throw err
+    }
+  },
+
+  updateSale: async (id, data) => {
+    set({ loading: true, error: null })
+    try {
+      await saleService.update(id, data)
       const sales = await saleService.getAll()
       set({ sales, loading: false })
     } catch (err) {
