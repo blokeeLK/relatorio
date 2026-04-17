@@ -166,6 +166,7 @@ export const stockService = {
   },
 
   async deleteEntry(id: string): Promise<void> {
+    // Busca a entrada (necessário para saber produto/tamanho e recalcular estoque)
     const { data: existing, error: getErr } = await supabase
       .from('stock_entries')
       .select('*')
@@ -174,17 +175,29 @@ export const stockService = {
     if (getErr) throw getErr
     if (!existing) throw new Error('Entrada não encontrada.')
 
+    // Exclusão forçada: zera custo_unitario_snapshot das vendas que
+    // consumiram unidades desta entrada (evita órfãos de custo no relatório)
     const consumed = (existing.quantidade ?? 0) - (existing.remaining_quantity ?? 0)
     if (consumed > 0) {
-      throw new Error(`Não é possível excluir: ${consumed} unidade(s) já foram vendidas desta entrada.`)
+      // Marca as vendas do mesmo produto/tamanho com custo zerado para sinalizar
+      // que o snapshot ficou sem referência — não remove a venda, só limpa o custo.
+      await supabase
+        .from('sales')
+        .update({ custo_unitario_snapshot: 0 })
+        .eq('product_id', existing.product_id)
+        .eq('tamanho', existing.tamanho)
+        .gt('created_at', existing.created_at) // vendas posteriores à entrada
+        .lte('created_at', new Date().toISOString())
     }
 
+    // Exclui a entrada
     const { error: delErr } = await supabase
       .from('stock_entries')
       .delete()
       .eq('id', id)
     if (delErr) throw delErr
 
+    // Recalcula o saldo de estoque para o produto/tamanho afetado
     await this.recomputeStock(existing.product_id, existing.tamanho)
   },
 

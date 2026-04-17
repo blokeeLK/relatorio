@@ -88,7 +88,7 @@ export const StockEntries: React.FC = () => {
       setDeleteId(null)
       setDeleteError(null)
     } catch (err) {
-      setDeleteError((err as Error).message)
+      setDeleteError(`Erro ao excluir: ${(err as Error).message}`)
     }
   }
 
@@ -271,7 +271,10 @@ export const StockEntries: React.FC = () => {
         onClose={() => { setDeleteId(null); setDeleteError(null) }}
         onConfirm={handleDelete}
         title="Excluir Entrada"
-        message={deleteError || 'O estoque será recalculado automaticamente. Deseja continuar?'}
+        message={
+          deleteError ||
+          'Esta entrada será excluída permanentemente. O estoque será recalculado automaticamente. Deseja continuar?'
+        }
         confirmText="Excluir"
       />
     </div>

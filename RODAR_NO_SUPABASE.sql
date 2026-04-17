@@ -295,7 +295,84 @@ NOTIFY pgrst, 'reload schema';
 
 
 -- ============================================
--- 8) VERIFICAÇÃO — deve listar todas as colunas esperadas
+-- 8) EXCLUSÃO FORÇADA DE ENTRADAS
+--    Permite excluir stock_entries mesmo com vendas vinculadas.
+--    Ao excluir uma entrada, zera custo_unitario_snapshot das
+--    vendas órfãs e recalcula o saldo de estoque.
+-- ============================================
+
+-- Função auxiliar: recalcula stock.quantidade somando remaining_quantity
+CREATE OR REPLACE FUNCTION public.recompute_stock(p_product_id UUID, p_tamanho TEXT)
+RETURNS void LANGUAGE plpgsql AS $$
+DECLARE
+  v_total INTEGER;
+BEGIN
+  SELECT COALESCE(SUM(remaining_quantity), 0)
+    INTO v_total
+    FROM public.stock_entries
+   WHERE product_id = p_product_id
+     AND tamanho    = p_tamanho;
+
+  UPDATE public.stock
+     SET quantidade = v_total
+   WHERE product_id = p_product_id
+     AND tamanho    = p_tamanho;
+
+  -- Cria linha de estoque se ainda não existir
+  IF NOT FOUND THEN
+    INSERT INTO public.stock (product_id, tamanho, quantidade)
+    VALUES (p_product_id, p_tamanho, v_total)
+    ON CONFLICT (product_id, tamanho) DO UPDATE SET quantidade = EXCLUDED.quantidade;
+  END IF;
+END;
+$$;
+
+-- Trigger que executa a exclusão forçada:
+-- 1. Zera custo_unitario_snapshot das vendas vinculadas (evita órfãos)
+-- 2. Recalcula estoque após deletar a entrada
+CREATE OR REPLACE FUNCTION public.before_delete_stock_entry()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  v_consumed INTEGER;
+BEGIN
+  v_consumed := COALESCE(OLD.quantidade, 0) - COALESCE(OLD.remaining_quantity, 0);
+
+  IF v_consumed > 0 THEN
+    -- Zera snapshot de custo nas vendas do mesmo produto/tamanho
+    -- que foram registradas após esta entrada (prováveis consumidoras FIFO)
+    UPDATE public.sales
+       SET custo_unitario_snapshot = 0
+     WHERE product_id = OLD.product_id
+       AND tamanho    = OLD.tamanho
+       AND status     = 'completed'
+       AND created_at >= OLD.created_at;
+  END IF;
+
+  RETURN OLD;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_before_delete_stock_entry ON public.stock_entries;
+CREATE TRIGGER trg_before_delete_stock_entry
+  BEFORE DELETE ON public.stock_entries
+  FOR EACH ROW EXECUTE FUNCTION public.before_delete_stock_entry();
+
+CREATE OR REPLACE FUNCTION public.after_delete_stock_entry()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM public.recompute_stock(OLD.product_id, OLD.tamanho);
+  RETURN NULL;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_after_delete_stock_entry ON public.stock_entries;
+CREATE TRIGGER trg_after_delete_stock_entry
+  AFTER DELETE ON public.stock_entries
+  FOR EACH ROW EXECUTE FUNCTION public.after_delete_stock_entry();
+
+
+-- ============================================
+-- 9) VERIFICAÇÃO — deve listar todas as colunas esperadas
 -- ============================================
 SELECT table_name, column_name, data_type
 FROM information_schema.columns
