@@ -13,6 +13,8 @@ interface StockStore {
   fetchEntries: () => Promise<void>
   fetchLowStock: () => Promise<void>
   addEntry: (data: StockEntryFormData) => Promise<void>
+  updateEntry: (id: string, data: StockEntryFormData) => Promise<void>
+  deleteEntry: (id: string) => Promise<void>
 }
 
 export const useStockStore = create<StockStore>((set) => ({
@@ -59,7 +61,40 @@ export const useStockStore = create<StockStore>((set) => ({
     set({ loading: true, error: null })
     try {
       await stockService.addEntry(data)
-      // Refresh stock data
+      const [stock, totalValue, entries, lowStock] = await Promise.all([
+        stockService.getAll(),
+        stockService.getTotalStockValue(),
+        stockService.getEntries(),
+        stockService.getLowStock(10),
+      ])
+      set({ stock, totalValue, entries, lowStock, loading: false })
+    } catch (err) {
+      set({ error: (err as Error).message, loading: false })
+      throw err
+    }
+  },
+
+  updateEntry: async (id, data) => {
+    set({ loading: true, error: null })
+    try {
+      await stockService.updateEntry(id, data)
+      const [stock, totalValue, entries, lowStock] = await Promise.all([
+        stockService.getAll(),
+        stockService.getTotalStockValue(),
+        stockService.getEntries(),
+        stockService.getLowStock(10),
+      ])
+      set({ stock, totalValue, entries, lowStock, loading: false })
+    } catch (err) {
+      set({ error: (err as Error).message, loading: false })
+      throw err
+    }
+  },
+
+  deleteEntry: async (id) => {
+    set({ loading: true, error: null })
+    try {
+      await stockService.deleteEntry(id)
       const [stock, totalValue, entries, lowStock] = await Promise.all([
         stockService.getAll(),
         stockService.getTotalStockValue(),
