@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react'
-import { Plus, PackagePlus } from 'lucide-react'
+import { Plus, PackagePlus, Edit2, Trash2 } from 'lucide-react'
 import { format } from 'date-fns'
 import { useStockStore } from '@/store/useStockStore'
 import { useProductStore } from '@/store/useProductStore'
 import { Modal } from '@/components/Modal'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { EmptyState } from '@/components/EmptyState'
 import { PageLoading } from '@/components/LoadingSpinner'
 import type { StockEntryFormData, Size } from '@/types'
@@ -21,37 +22,52 @@ const emptyForm: StockEntryFormData = {
 }
 
 export const StockEntries: React.FC = () => {
-  const { entries, loading: stockLoading, fetchEntries, addEntry } = useStockStore()
+  const { entries, loading: stockLoading, fetchEntries, addEntry, updateEntry, deleteEntry } = useStockStore()
   const { products, fetchProducts } = useProductStore()
   const [modalOpen, setModalOpen] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<StockEntryFormData>(emptyForm)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [deleteId, setDeleteId] = useState<string | null>(null)
 
   useEffect(() => {
     fetchEntries()
     fetchProducts()
   }, [fetchEntries, fetchProducts])
 
+  const openCreate = () => {
+    setEditingId(null)
+    setForm(emptyForm)
+    setError(null)
+    setModalOpen(true)
+  }
+
+  const openEdit = (entry: typeof entries[0]) => {
+    setEditingId(entry.id)
+    setForm({
+      product_id: entry.product_id,
+      tamanho: entry.tamanho as Size,
+      quantidade: String(entry.quantidade),
+      custo_unitario: String(entry.custo_unitario),
+    })
+    setError(null)
+    setModalOpen(true)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!form.product_id) {
-      setError('Selecione um produto')
-      return
-    }
-    if (Number(form.quantidade) <= 0) {
-      setError('Quantidade deve ser maior que zero')
-      return
-    }
-    if (Number(form.custo_unitario) <= 0) {
-      setError('Custo unitário deve ser maior que zero')
-      return
-    }
-
+    if (!form.product_id) { setError('Selecione um produto'); return }
+    if (Number(form.quantidade) <= 0) { setError('Quantidade deve ser maior que zero'); return }
+    if (Number(form.custo_unitario) <= 0) { setError('Custo unitário deve ser maior que zero'); return }
     setSaving(true)
     setError(null)
     try {
-      await addEntry(form)
+      if (editingId) {
+        await updateEntry(editingId, form)
+      } else {
+        await addEntry(form)
+      }
       setModalOpen(false)
       setForm(emptyForm)
     } catch (err) {
@@ -61,15 +77,23 @@ export const StockEntries: React.FC = () => {
     }
   }
 
+  const handleDelete = async () => {
+    if (!deleteId) return
+    try {
+      await deleteEntry(deleteId)
+      setDeleteId(null)
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
   if (stockLoading && entries.length === 0) return <PageLoading />
 
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
-        <p className="text-dark-400 text-sm">
-          {entries.length} entrada(s) registrada(s)
-        </p>
-        <button onClick={() => { setForm(emptyForm); setError(null); setModalOpen(true) }} className="btn-primary" id="btn-add-entry">
+        <p className="text-dark-400 text-sm">{entries.length} entrada(s) registrada(s)</p>
+        <button onClick={openCreate} className="btn-primary" id="btn-add-entry">
           <Plus className="w-4 h-4" />
           Nova Entrada
         </button>
@@ -86,17 +110,14 @@ export const StockEntries: React.FC = () => {
                 <th>Custo Unit.</th>
                 <th>Total</th>
                 <th>Data</th>
+                <th className="text-right">Ações</th>
               </tr>
             </thead>
             <tbody>
               {entries.map((entry) => (
                 <tr key={entry.id}>
-                  <td className="font-medium text-dark-100">
-                    {entry.products?.nome || '—'}
-                  </td>
-                  <td>
-                    <span className="size-badge-active">{entry.tamanho}</span>
-                  </td>
+                  <td className="font-medium text-dark-100">{entry.products?.nome || '—'}</td>
+                  <td><span className="size-badge-active">{entry.tamanho}</span></td>
                   <td className="font-semibold text-success-400">+{entry.quantidade}</td>
                   <td>{formatCurrency(entry.custo_unitario)}</td>
                   <td className="font-semibold text-dark-200">
@@ -104,6 +125,20 @@ export const StockEntries: React.FC = () => {
                   </td>
                   <td className="text-dark-400 text-xs">
                     {format(new Date(entry.created_at), 'dd/MM/yyyy HH:mm')}
+                  </td>
+                  <td>
+                    <div className="flex items-center justify-end gap-1">
+                      <button onClick={() => openEdit(entry)} className="btn-icon" title="Editar">
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => setDeleteId(entry.id)}
+                        className="btn-icon text-danger-400 hover:text-danger-300 hover:bg-danger-500/10"
+                        title="Excluir"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -124,11 +159,10 @@ export const StockEntries: React.FC = () => {
         />
       )}
 
-      {/* Entry Modal */}
       <Modal
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
-        title="Nova Entrada de Mercadoria"
+        title={editingId ? 'Editar Entrada' : 'Nova Entrada de Mercadoria'}
       >
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
@@ -136,7 +170,6 @@ export const StockEntries: React.FC = () => {
               {error}
             </div>
           )}
-
           <div>
             <label className="input-label">Produto *</label>
             <select
@@ -152,7 +185,6 @@ export const StockEntries: React.FC = () => {
               ))}
             </select>
           </div>
-
           <div>
             <label className="input-label">Tamanho *</label>
             <div className="flex gap-2">
@@ -172,7 +204,6 @@ export const StockEntries: React.FC = () => {
               ))}
             </div>
           </div>
-
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="input-label">Quantidade *</label>
@@ -195,7 +226,6 @@ export const StockEntries: React.FC = () => {
               />
             </div>
           </div>
-
           {Number(form.quantidade) > 0 && Number(form.custo_unitario) > 0 && (
             <div className="p-3 rounded-xl bg-brand-600/10 border border-brand-500/20">
               <p className="text-xs text-dark-400">Total da entrada</p>
@@ -204,17 +234,25 @@ export const StockEntries: React.FC = () => {
               </p>
             </div>
           )}
-
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">
               Cancelar
             </button>
             <button type="submit" className="btn-success" disabled={saving}>
-              {saving ? 'Registrando...' : 'Registrar Entrada'}
+              {saving ? 'Salvando...' : editingId ? 'Atualizar' : 'Registrar Entrada'}
             </button>
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        isOpen={!!deleteId}
+        onClose={() => setDeleteId(null)}
+        onConfirm={handleDelete}
+        title="Excluir Entrada"
+        message="Tem certeza? Isso removerá o registro e ajustará o estoque."
+        confirmText="Excluir"
+      />
     </div>
   )
 }
