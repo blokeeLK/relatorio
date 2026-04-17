@@ -13,6 +13,9 @@ import { SIZES } from '@/types'
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
 
+// Gera código curto do lote a partir do UUID (últimos 6 chars)
+const loteCode = (id: string) => `#${id.slice(-6).toUpperCase()}`
+
 const emptyForm: StockEntryFormData = {
   product_id: '',
   tamanho: 'M',
@@ -38,18 +41,9 @@ export const StockEntries: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!form.product_id) {
-      setError('Selecione um produto')
-      return
-    }
-    if (Number(form.quantidade) <= 0) {
-      setError('Quantidade deve ser maior que zero')
-      return
-    }
-    if (Number(form.custo_unitario) <= 0) {
-      setError('Custo unitário deve ser maior que zero')
-      return
-    }
+    if (!form.product_id) { setError('Selecione um produto'); return }
+    if (Number(form.quantidade) <= 0) { setError('Quantidade deve ser maior que zero'); return }
+    if (Number(form.custo_unitario) <= 0) { setError('Custo unitário deve ser maior que zero'); return }
 
     setSaving(true)
     setError(null)
@@ -97,73 +91,86 @@ export const StockEntries: React.FC = () => {
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
-        <p className="text-dark-400 text-sm">
-          {entries.length} entrada(s) registrada(s)
-        </p>
-        <button onClick={() => { setForm(emptyForm); setEditingId(null); setError(null); setModalOpen(true) }} className="btn-primary" id="btn-add-entry">
+        <p className="text-dark-400 text-sm">{entries.length} lote(s) registrado(s)</p>
+        <button
+          onClick={() => { setForm(emptyForm); setEditingId(null); setError(null); setModalOpen(true) }}
+          className="btn-primary"
+          id="btn-add-entry"
+        >
           <Plus className="w-4 h-4" />
           Nova Entrada
         </button>
       </div>
 
       {entries.length > 0 ? (
-        <div className="table-container">
-          <table>
+        <div className="table-container overflow-x-auto">
+          <table className="min-w-[900px]">
             <thead>
               <tr>
+                <th>Lote</th>
                 <th>Produto</th>
-                <th>Tamanho</th>
-                <th>Qtd</th>
+                <th>Tam.</th>
+                <th>Qtd Total</th>
+                <th>Saldo Lote</th>
                 <th>Custo Unit.</th>
-                <th>Total</th>
+                <th>Valor Lote</th>
                 <th>Data</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {entries.map((entry) => (
-                <tr key={entry.id}>
-                  <td className="font-medium text-dark-100">
-                    {entry.products?.nome || '—'}
-                  </td>
-                  <td>
-                    <span className="size-badge-active">{entry.tamanho}</span>
-                  </td>
-                  <td className="font-semibold text-success-400">+{entry.quantidade}</td>
-                  <td>{formatCurrency(entry.custo_unitario)}</td>
-                  <td className="font-semibold text-dark-200">
-                    {formatCurrency(entry.quantidade * entry.custo_unitario)}
-                  </td>
-                  <td className="text-dark-400 text-xs">
-                    {format(new Date(entry.created_at), 'dd/MM/yyyy HH:mm')}
-                  </td>
-                  <td>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => openEdit(entry)}
-                        className="btn-icon text-brand-400 hover:text-brand-300 hover:bg-brand-500/10"
-                        title="Editar"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => { setDeleteError(null); setDeleteId(entry.id) }}
-                        className="btn-icon text-danger-400 hover:text-danger-300 hover:bg-danger-500/10"
-                        title="Excluir"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {entries.map((entry) => {
+                const saldoLote = entry.remaining_quantity
+                const valorLote = saldoLote * entry.custo_unitario
+                const esgotado = saldoLote === 0
+                return (
+                  <tr key={entry.id} className={esgotado ? 'opacity-50' : ''}>
+                    <td>
+                      <span className="font-mono text-xs bg-dark-700/60 px-2 py-1 rounded-lg text-brand-300">
+                        {loteCode(entry.id)}
+                      </span>
+                    </td>
+                    <td className="font-medium text-dark-100">{entry.products?.nome || '—'}</td>
+                    <td><span className="size-badge-active">{entry.tamanho}</span></td>
+                    <td className="text-dark-300">{entry.quantidade}</td>
+                    <td>
+                      <span className={`font-bold ${esgotado ? 'text-dark-500' : saldoLote < 5 ? 'text-warning-400' : 'text-success-400'}`}>
+                        {esgotado ? 'Esgotado' : `${saldoLote} un.`}
+                      </span>
+                    </td>
+                    <td>{formatCurrency(entry.custo_unitario)}</td>
+                    <td className="font-semibold text-dark-200">{formatCurrency(valorLote)}</td>
+                    <td className="text-dark-400 text-xs whitespace-nowrap">
+                      {format(new Date(entry.created_at), 'dd/MM/yyyy HH:mm')}
+                    </td>
+                    <td>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => openEdit(entry)}
+                          className="btn-icon text-brand-400 hover:text-brand-300 hover:bg-brand-500/10"
+                          title="Editar"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => { setDeleteError(null); setDeleteId(entry.id) }}
+                          className="btn-icon text-danger-400 hover:text-danger-300 hover:bg-danger-500/10"
+                          title="Excluir"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
       ) : (
         <EmptyState
           title="Nenhuma entrada registrada"
-          description="Registre a entrada de mercadorias para controlar o estoque e custo médio."
+          description="Registre a entrada de mercadorias para controlar o estoque por lote."
           icon={<PackagePlus className="w-8 h-8 text-dark-500" />}
           action={
             <button onClick={() => setModalOpen(true)} className="btn-primary">
@@ -174,7 +181,6 @@ export const StockEntries: React.FC = () => {
         />
       )}
 
-      {/* Entry Modal */}
       <Modal
         isOpen={modalOpen}
         onClose={() => { setModalOpen(false); setEditingId(null) }}
@@ -205,7 +211,7 @@ export const StockEntries: React.FC = () => {
 
           <div>
             <label className="input-label">Tamanho *</label>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               {SIZES.map((size) => (
                 <button
                   key={size}
@@ -231,7 +237,7 @@ export const StockEntries: React.FC = () => {
                 value={form.quantidade}
                 onChange={(e) => setForm({ ...form, quantidade: e.target.value })}
                 className="input-field"
-                placeholder="Ex: 10"
+                placeholder="Ex: 100"
               />
             </div>
             <div>
@@ -248,7 +254,7 @@ export const StockEntries: React.FC = () => {
 
           {Number(form.quantidade) > 0 && Number(form.custo_unitario) > 0 && (
             <div className="p-3 rounded-xl bg-brand-600/10 border border-brand-500/20">
-              <p className="text-xs text-dark-400">Total da entrada</p>
+              <p className="text-xs text-dark-400">Valor total do lote</p>
               <p className="text-lg font-bold text-brand-400">
                 {formatCurrency(Number(form.quantidade) * Number(form.custo_unitario))}
               </p>
@@ -260,7 +266,9 @@ export const StockEntries: React.FC = () => {
               Cancelar
             </button>
             <button type="submit" className="btn-success" disabled={saving}>
-              {saving ? (editingId ? 'Salvando...' : 'Registrando...') : (editingId ? 'Salvar Alterações' : 'Registrar Entrada')}
+              {saving
+                ? editingId ? 'Salvando...' : 'Registrando...'
+                : editingId ? 'Salvar Alterações' : 'Registrar Entrada'}
             </button>
           </div>
         </form>
@@ -270,10 +278,10 @@ export const StockEntries: React.FC = () => {
         isOpen={!!deleteId}
         onClose={() => { setDeleteId(null); setDeleteError(null) }}
         onConfirm={handleDelete}
-        title="Excluir Entrada"
+        title="Excluir Lote"
         message={
           deleteError ||
-          'Esta entrada será excluída permanentemente. O estoque será recalculado automaticamente. Deseja continuar?'
+          'Este lote será excluído permanentemente. O estoque será recalculado. Deseja continuar?'
         }
         confirmText="Excluir"
       />

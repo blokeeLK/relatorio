@@ -8,7 +8,6 @@ export const stockService = {
       .from('stock')
       .select('*, products(*)')
       .order('quantidade', { ascending: true })
-
     if (error) throw error
     return (data || []) as StockWithProduct[]
   },
@@ -18,7 +17,6 @@ export const stockService = {
       .from('stock')
       .select('*')
       .eq('product_id', productId)
-
     if (error) throw error
     return data || []
   },
@@ -30,9 +28,21 @@ export const stockService = {
       .eq('product_id', productId)
       .eq('tamanho', size)
       .single()
-
     if (error && error.code !== 'PGRST116') throw error
     return data
+  },
+
+  // Retorna todos os lotes com saldo > 0 para produto+tamanho (para seleção na venda)
+  async getAvailableLotes(productId: string, tamanho: Size): Promise<StockEntry[]> {
+    const { data, error } = await supabase
+      .from('stock_entries')
+      .select('*')
+      .eq('product_id', productId)
+      .eq('tamanho', tamanho)
+      .gt('remaining_quantity', 0)
+      .order('created_at', { ascending: true })
+    if (error) throw error
+    return (data || []) as StockEntry[]
   },
 
   async getLowStock(threshold: number = 10): Promise<StockWithProduct[]> {
@@ -42,7 +52,6 @@ export const stockService = {
       .lt('quantidade', threshold)
       .gt('quantidade', 0)
       .order('quantidade', { ascending: true })
-
     if (error) throw error
     return (data || []) as StockWithProduct[]
   },
@@ -53,19 +62,15 @@ export const stockService = {
       tamanho: size,
       quantidade: 0,
     }))
-
-    const { error } = await supabase
-      .from('stock')
-      .insert(stockEntries)
-
+    const { error } = await supabase.from('stock').insert(stockEntries)
     if (error) throw error
   },
 
   async addEntry(entry: StockEntryFormData): Promise<StockEntry> {
-    // 1. Register the entry in stock_entries history
     const quantidade = Number(entry.quantidade)
     const custo_unitario = Number(entry.custo_unitario)
 
+    // 1. Cria o lote
     const { data: entryData, error: entryError } = await supabase
       .from('stock_entries')
       .insert({
@@ -77,48 +82,34 @@ export const stockService = {
       })
       .select()
       .single()
-
     if (entryError) throw entryError
 
-    // 2. Get current stock for this product+size
+    // 2. Atualiza saldo consolidado em stock
     const { data: currentStock, error: stockError } = await supabase
       .from('stock')
       .select('*')
       .eq('product_id', entry.product_id)
       .eq('tamanho', entry.tamanho)
       .single()
-
     if (stockError && stockError.code !== 'PGRST116') throw stockError
 
     if (currentStock) {
-      // 3. Update stock quantity
-      const totalQuantidade = (currentStock.quantidade ?? 0) + quantidade
-
-      // 4. Update stock
-      const { error: updateError } = await supabase
+      const { error } = await supabase
         .from('stock')
-        .update({ quantidade: totalQuantidade })
+        .update({ quantidade: (currentStock.quantidade ?? 0) + quantidade })
         .eq('id', currentStock.id)
-
-      if (updateError) throw updateError
+      if (error) throw error
     } else {
-      // Create stock entry if it doesn't exist
-      const { error: insertError } = await supabase
+      const { error } = await supabase
         .from('stock')
-        .insert({
-          product_id: entry.product_id,
-          tamanho: entry.tamanho,
-          quantidade,
-        })
-
-      if (insertError) throw insertError
+        .insert({ product_id: entry.product_id, tamanho: entry.tamanho, quantidade })
+      if (error) throw error
     }
 
     return entryData
   },
 
   async updateEntry(id: string, data: StockEntryFormData): Promise<void> {
-    // Fetch existing entry
     const { data: existing, error: getErr } = await supabase
       .from('stock_entries')
       .select('*')
@@ -138,11 +129,8 @@ export const stockService = {
     }
 
     const newRemaining = newQuantidade - consumed
-
-    // If product_id or tamanho changed, adjust stock totals accordingly
     const productChanged = existing.product_id !== data.product_id || existing.tamanho !== data.tamanho
 
-    // Update the entry itself
     const { error: updErr } = await supabase
       .from('stock_entries')
       .update({
@@ -155,9 +143,7 @@ export const stockService = {
       .eq('id', id)
     if (updErr) throw updErr
 
-    // Recompute stock totals
     if (productChanged) {
-      // Old: subtract existing.quantidade from old product/size stock
       await this.recomputeStock(existing.product_id, existing.tamanho)
       await this.recomputeStock(data.product_id, data.tamanho)
     } else {
@@ -166,7 +152,6 @@ export const stockService = {
   },
 
   async deleteEntry(id: string): Promise<void> {
-    // Busca a entrada (necessário para saber produto/tamanho e recalcular estoque)
     const { data: existing, error: getErr } = await supabase
       .from('stock_entries')
       .select('*')
@@ -175,34 +160,25 @@ export const stockService = {
     if (getErr) throw getErr
     if (!existing) throw new Error('Entrada não encontrada.')
 
-    // Exclusão forçada: zera custo_unitario_snapshot das vendas que
-    // consumiram unidades desta entrada (evita órfãos de custo no relatório)
     const consumed = (existing.quantidade ?? 0) - (existing.remaining_quantity ?? 0)
     if (consumed > 0) {
-      // Marca as vendas do mesmo produto/tamanho com custo zerado para sinalizar
-      // que o snapshot ficou sem referência — não remove a venda, só limpa o custo.
+      // Zera snapshot de custo nas vendas vinculadas a este lote
       await supabase
         .from('sales')
-        .update({ custo_unitario_snapshot: 0 })
-        .eq('product_id', existing.product_id)
-        .eq('tamanho', existing.tamanho)
-        .gt('created_at', existing.created_at) // vendas posteriores à entrada
-        .lte('created_at', new Date().toISOString())
+        .update({ custo_unitario_snapshot: 0, stock_entry_id: null })
+        .eq('stock_entry_id', existing.id)
     }
 
-    // Exclui a entrada
     const { error: delErr } = await supabase
       .from('stock_entries')
       .delete()
       .eq('id', id)
     if (delErr) throw delErr
 
-    // Recalcula o saldo de estoque para o produto/tamanho afetado
     await this.recomputeStock(existing.product_id, existing.tamanho)
   },
 
   async recomputeStock(productId: string, tamanho: Size): Promise<void> {
-    // Sum remaining_quantity across all entries for this product+size
     const { data: entries, error: entriesErr } = await supabase
       .from('stock_entries')
       .select('remaining_quantity')
@@ -221,16 +197,16 @@ export const stockService = {
     if (stockErr && stockErr.code !== 'PGRST116') throw stockErr
 
     if (existing) {
-      const { error: updErr } = await supabase
+      const { error } = await supabase
         .from('stock')
         .update({ quantidade: total })
         .eq('id', existing.id)
-      if (updErr) throw updErr
+      if (error) throw error
     } else {
-      const { error: insErr } = await supabase
+      const { error } = await supabase
         .from('stock')
         .insert({ product_id: productId, tamanho, quantidade: total })
-      if (insErr) throw insErr
+      if (error) throw error
     }
   },
 
@@ -239,18 +215,14 @@ export const stockService = {
       .from('stock_entries')
       .select('*, products(*)')
       .order('created_at', { ascending: false })
-
     if (error) throw error
     return (data || []) as StockEntryWithProduct[]
   },
 
   async getTotalStockValue(): Promise<number> {
-    // Soma (remaining_quantity * custo_unitario) de todas as entradas,
-    // evitando duplicidade — considera apenas o estoque ainda disponível por entrada.
     const { data, error } = await supabase
       .from('stock_entries')
       .select('remaining_quantity, custo_unitario')
-
     if (error) throw error
     return (data || []).reduce(
       (total, item) => total + (item.remaining_quantity ?? 0) * (item.custo_unitario ?? 0),

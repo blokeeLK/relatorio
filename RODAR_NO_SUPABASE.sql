@@ -372,7 +372,78 @@ CREATE TRIGGER trg_after_delete_stock_entry
 
 
 -- ============================================
--- 9) VERIFICAÇÃO — deve listar todas as colunas esperadas
+-- 9) COLUNA stock_entry_id EM SALES
+--    Vincula cada venda ao lote exato de origem.
+-- ============================================
+
+-- Adiciona a FK para o lote (nullable: vendas antigas ficam NULL)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name   = 'sales'
+      AND column_name  = 'stock_entry_id'
+  ) THEN
+    ALTER TABLE public.sales
+      ADD COLUMN stock_entry_id UUID REFERENCES public.stock_entries(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_sales_stock_entry ON public.sales(stock_entry_id);
+
+-- Atualiza o trigger de exclusão de lote para usar a FK direta
+CREATE OR REPLACE FUNCTION public.before_delete_stock_entry()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  -- Zera snapshot e desvincula vendas que referenciam este lote
+  UPDATE public.sales
+     SET custo_unitario_snapshot = 0,
+         stock_entry_id          = NULL
+   WHERE stock_entry_id = OLD.id;
+
+  RETURN OLD;
+END;
+$$;
+
+
+-- ============================================
+-- 10) RECALCULAR remaining_quantity DOS LOTES EXISTENTES
+--     (garante consistência em dados já cadastrados)
+-- ============================================
+DO $$
+DECLARE
+  r RECORD;
+  v_vendido INTEGER;
+BEGIN
+  FOR r IN SELECT id, quantidade FROM public.stock_entries LOOP
+    SELECT COALESCE(SUM(s.quantidade), 0)
+      INTO v_vendido
+      FROM public.sales s
+     WHERE s.stock_entry_id = r.id
+       AND s.status = 'completed';
+
+    UPDATE public.stock_entries
+       SET remaining_quantity = GREATEST(0, r.quantidade - v_vendido)
+     WHERE id = r.id;
+  END LOOP;
+END $$;
+
+-- Recalcula saldo consolidado em stock para todos os produtos/tamanhos
+DO $$
+DECLARE
+  r RECORD;
+BEGIN
+  FOR r IN
+    SELECT DISTINCT product_id, tamanho FROM public.stock_entries
+  LOOP
+    PERFORM public.recompute_stock(r.product_id, r.tamanho);
+  END LOOP;
+END $$;
+
+
+-- ============================================
+-- 11) VERIFICAÇÃO — deve listar todas as colunas esperadas
 -- ============================================
 SELECT table_name, column_name, data_type
 FROM information_schema.columns

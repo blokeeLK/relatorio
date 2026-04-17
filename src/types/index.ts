@@ -76,6 +76,7 @@ export interface Sale {
   preco_venda: number
   desconto: number
   custo_unitario_snapshot: number
+  stock_entry_id: string | null   // lote selecionado explicitamente
   frete_cobrado: number
   frete_custo: number
   customer_name: string
@@ -105,6 +106,7 @@ export interface StockEntryWithProduct extends StockEntry {
 
 export interface SaleWithProduct extends Sale {
   products: Product
+  stock_entries?: StockEntry | null
 }
 
 // ---- Form Types ----
@@ -125,6 +127,7 @@ export interface StockEntryFormData {
 export interface SaleFormData {
   product_id: string
   tamanho: Size
+  stock_entry_id: string          // lote explícito obrigatório
   quantidade: number | string
   preco_venda: number | string
   desconto: number | string

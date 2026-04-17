@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useCallback } from 'react'
 import { Plus, ShoppingCart, Trash2, Pencil } from 'lucide-react'
 import { format } from 'date-fns'
 import { useSaleStore } from '@/store/useSaleStore'
@@ -8,7 +8,7 @@ import { Modal } from '@/components/Modal'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { EmptyState } from '@/components/EmptyState'
 import { PageLoading } from '@/components/LoadingSpinner'
-import type { SaleFormData, Size } from '@/types'
+import type { SaleFormData, Size, StockEntry } from '@/types'
 import { SIZES, PAYMENT_METHODS, SALE_STATUSES } from '@/types'
 import { stockService } from '@/services/stockService'
 import { friendlySupabaseError } from '@/lib/supabase'
@@ -16,9 +16,12 @@ import { friendlySupabaseError } from '@/lib/supabase'
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
 
+const loteCode = (id: string) => `#${id.slice(-6).toUpperCase()}`
+
 const emptySaleForm: SaleFormData = {
   product_id: '',
   tamanho: 'M',
+  stock_entry_id: '',
   quantidade: '',
   preco_venda: '',
   desconto: '',
@@ -39,38 +42,48 @@ export const Sales: React.FC = () => {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deleteId, setDeleteId] = useState<string | null>(null)
-  const [availableQty, setAvailableQty] = useState<number | null>(null)
+
+  // Lotes disponíveis para produto+tamanho selecionado
+  const [lotesDisponiveis, setLotesDisponiveis] = useState<StockEntry[]>([])
+  const [loadingLotes, setLoadingLotes] = useState(false)
 
   useEffect(() => {
     fetchSales()
     fetchProducts()
   }, [fetchSales, fetchProducts])
 
-  // Check stock availability when product/tamanho changes.
-  // When editing a sale, add the quantity currently reserved by this sale
-  // (if same product/tamanho) to the available stock shown.
-  useEffect(() => {
-    if (form.product_id && form.tamanho) {
-      stockService.getStockForSale(form.product_id, form.tamanho).then((stock) => {
-        let base = stock?.quantidade ?? 0
-        if (editingId) {
-          const original = sales.find((s) => s.id === editingId)
-          if (
-            original &&
-            original.status === 'completed' &&
-            original.product_id === form.product_id &&
-            original.tamanho === form.tamanho
-          ) {
-            base += original.quantidade
-          }
-        }
-        setAvailableQty(base)
-      })
-    } else {
-      setAvailableQty(null)
-    }
-  }, [form.product_id, form.tamanho, editingId, sales])
+  // Busca lotes sempre que produto ou tamanho mudar
+  const fetchLotes = useCallback(async (productId: string, tamanho: Size, currentSaleId?: string | null) => {
+    if (!productId || !tamanho) { setLotesDisponiveis([]); return }
+    setLoadingLotes(true)
+    try {
+      let lotes = await stockService.getAvailableLotes(productId, tamanho)
 
+      // Se estiver editando, inclui o lote da venda original (mesmo que saldo = 0 nele agora)
+      if (currentSaleId) {
+        const original = sales.find(s => s.id === currentSaleId)
+        if (original?.stock_entry_id && !lotes.find(l => l.id === original.stock_entry_id)) {
+          const { data } = await (await import('@/lib/supabase')).supabase
+            .from('stock_entries')
+            .select('*')
+            .eq('id', original.stock_entry_id)
+            .single()
+          if (data) lotes = [data as StockEntry, ...lotes]
+        }
+      }
+      setLotesDisponiveis(lotes)
+    } finally {
+      setLoadingLotes(false)
+    }
+  }, [sales])
+
+  useEffect(() => {
+    fetchLotes(form.product_id, form.tamanho as Size, editingId)
+    // Reseta lote ao trocar produto/tamanho
+    setForm(prev => ({ ...prev, stock_entry_id: '' }))
+  }, [form.product_id, form.tamanho]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const loteAtual = lotesDisponiveis.find(l => l.id === form.stock_entry_id) ?? null
   const parseNum = (v: string | number) => Number(String(v).replace(/\./g, '').replace(',', '.')) || 0
   const parsedQty = parseNum(form.quantidade)
   const parsedPrice = parseNum(form.preco_venda)
@@ -78,24 +91,17 @@ export const Sales: React.FC = () => {
   const parsedFreteCobrado = parseNum(form.frete_cobrado || 0)
   const parsedFreteCusto = parseNum(form.frete_custo || 0)
   const parsedLucroFrete = parsedFreteCobrado - parsedFreteCusto
+  const custoPrevisto = loteAtual ? parsedQty * loteAtual.custo_unitario : 0
+  const lucroPrevisto = parsedQty * parsedPrice - parsedDiscount - custoPrevisto + parsedLucroFrete
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!form.product_id) {
-      setError('Selecione um produto')
-      return
-    }
-    if (parsedQty <= 0) {
-      setError('Quantidade deve ser maior que zero')
-      return
-    }
-    if (parsedPrice <= 0) {
-      setError('Preço unitário deve ser maior que zero')
-      return
-    }
-    if (availableQty !== null && parsedQty > availableQty) {
-      setError(`Estoque insuficiente! Disponível: ${availableQty} unidades`)
-      return
+    if (!form.product_id) { setError('Selecione um produto'); return }
+    if (!form.stock_entry_id) { setError('Selecione o lote de origem'); return }
+    if (parsedQty <= 0) { setError('Quantidade deve ser maior que zero'); return }
+    if (parsedPrice <= 0) { setError('Preço unitário deve ser maior que zero'); return }
+    if (loteAtual && parsedQty > loteAtual.remaining_quantity) {
+      setError(`Saldo insuficiente no lote! Disponível: ${loteAtual.remaining_quantity} unidades`); return
     }
 
     setSaving(true)
@@ -117,11 +123,20 @@ export const Sales: React.FC = () => {
     }
   }
 
+  const openCreate = () => {
+    setForm(emptySaleForm)
+    setEditingId(null)
+    setLotesDisponiveis([])
+    setError(null)
+    setModalOpen(true)
+  }
+
   const openEdit = (sale: typeof sales[number]) => {
     setEditingId(sale.id)
     setForm({
       product_id: sale.product_id,
       tamanho: sale.tamanho,
+      stock_entry_id: sale.stock_entry_id || '',
       quantidade: String(sale.quantidade),
       preco_venda: String(sale.preco_venda),
       desconto: sale.desconto ? String(sale.desconto) : '',
@@ -133,6 +148,7 @@ export const Sales: React.FC = () => {
     })
     setError(null)
     setModalOpen(true)
+    fetchLotes(sale.product_id, sale.tamanho, sale.id)
   }
 
   const handleDelete = async () => {
@@ -154,11 +170,7 @@ export const Sales: React.FC = () => {
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <p className="text-dark-400 text-sm">{sales.length} venda(s)</p>
-        <button
-          onClick={() => { setForm(emptySaleForm); setEditingId(null); setError(null); setModalOpen(true) }}
-          className="btn-primary"
-          id="btn-add-sale"
-        >
+        <button onClick={openCreate} className="btn-primary" id="btn-add-sale">
           <Plus className="w-4 h-4" />
           Nova Venda
         </button>
@@ -166,16 +178,18 @@ export const Sales: React.FC = () => {
 
       {sales.length > 0 ? (
         <div className="table-container overflow-x-auto">
-          <table className="min-w-[960px]">
+          <table className="min-w-[1080px]">
             <thead>
               <tr>
                 <th>Produto</th>
                 <th>Tam.</th>
+                <th>Lote</th>
                 <th>Qtd</th>
                 <th>Preço Unit.</th>
                 <th>Desc.</th>
-                <th>Frete Cobrado</th>
+                <th>Frete</th>
                 <th>Total</th>
+                <th>Lucro</th>
                 <th>Cliente</th>
                 <th>Pagamento</th>
                 <th>Status</th>
@@ -186,13 +200,19 @@ export const Sales: React.FC = () => {
             <tbody>
               {sales.map((sale) => {
                 const total = sale.quantidade * sale.preco_venda - sale.desconto
+                const lucro = total - sale.custo_unitario_snapshot + (sale.frete_cobrado ?? 0) - (sale.frete_custo ?? 0)
                 const statusInfo = SALE_STATUSES.find((s) => s.value === sale.status)
                 return (
                   <tr key={sale.id}>
-                    <td className="font-medium text-dark-100">
-                      {sale.products?.nome || '—'}
-                    </td>
+                    <td className="font-medium text-dark-100">{sale.products?.nome || '—'}</td>
                     <td><span className="size-badge-active">{sale.tamanho}</span></td>
+                    <td>
+                      {sale.stock_entry_id ? (
+                        <span className="font-mono text-xs bg-dark-700/60 px-2 py-1 rounded-lg text-brand-300">
+                          {loteCode(sale.stock_entry_id)}
+                        </span>
+                      ) : '—'}
+                    </td>
                     <td className="font-semibold">{sale.quantidade}</td>
                     <td>{formatCurrency(sale.preco_venda)}</td>
                     <td className="text-danger-400">
@@ -202,12 +222,13 @@ export const Sales: React.FC = () => {
                       {(sale.frete_cobrado ?? 0) > 0 ? formatCurrency(sale.frete_cobrado) : '—'}
                     </td>
                     <td className="font-bold text-success-400">{formatCurrency(total)}</td>
+                    <td className={`font-semibold ${lucro >= 0 ? 'text-success-400' : 'text-danger-400'}`}>
+                      {formatCurrency(lucro)}
+                    </td>
                     <td>
                       <div>
                         <p className="text-sm">{sale.customer_name || '—'}</p>
-                        {sale.customer_phone && (
-                          <p className="text-xs text-dark-500">{sale.customer_phone}</p>
-                        )}
+                        {sale.customer_phone && <p className="text-xs text-dark-500">{sale.customer_phone}</p>}
                       </div>
                     </td>
                     <td className="text-xs">
@@ -254,7 +275,7 @@ export const Sales: React.FC = () => {
           description="Registre vendas para acompanhar o faturamento e lucro."
           icon={<ShoppingCart className="w-8 h-8 text-dark-500" />}
           action={
-            <button onClick={() => setModalOpen(true)} className="btn-primary">
+            <button onClick={openCreate} className="btn-primary">
               <Plus className="w-4 h-4" />
               Registrar Venda
             </button>
@@ -262,7 +283,7 @@ export const Sales: React.FC = () => {
         />
       )}
 
-      {/* Sale Modal */}
+      {/* Modal de venda */}
       <Modal
         isOpen={modalOpen}
         onClose={() => { setModalOpen(false); setEditingId(null) }}
@@ -276,11 +297,12 @@ export const Sales: React.FC = () => {
             </div>
           )}
 
+          {/* 1. Produto */}
           <div>
             <label className="input-label">Produto *</label>
             <select
               value={form.product_id}
-              onChange={(e) => setForm({ ...form, product_id: e.target.value })}
+              onChange={(e) => setForm({ ...form, product_id: e.target.value, stock_entry_id: '' })}
               className="select-field"
             >
               <option value="">Selecione um produto</option>
@@ -292,6 +314,7 @@ export const Sales: React.FC = () => {
             </select>
           </div>
 
+          {/* 2. Tamanho */}
           <div>
             <label className="input-label">Tamanho *</label>
             <div className="flex gap-2 flex-wrap">
@@ -299,7 +322,7 @@ export const Sales: React.FC = () => {
                 <button
                   key={t}
                   type="button"
-                  onClick={() => setForm({ ...form, tamanho: t as Size })}
+                  onClick={() => setForm({ ...form, tamanho: t as Size, stock_entry_id: '' })}
                   className={`px-3 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${
                     form.tamanho === t
                       ? 'bg-brand-600 text-white shadow-md shadow-brand-600/20'
@@ -310,13 +333,53 @@ export const Sales: React.FC = () => {
                 </button>
               ))}
             </div>
-            {availableQty !== null && (
-              <p className={`text-xs mt-1.5 ${availableQty < 10 ? 'text-warning-400' : 'text-dark-500'}`}>
-                Disponível: {availableQty} unidades
-              </p>
-            )}
           </div>
 
+          {/* 3. Seleção de Lote */}
+          {form.product_id && form.tamanho && (
+            <div>
+              <label className="input-label">Lote de Origem *</label>
+              {loadingLotes ? (
+                <p className="text-xs text-dark-500 mt-1">Carregando lotes...</p>
+              ) : lotesDisponiveis.length === 0 ? (
+                <div className="p-3 rounded-xl bg-warning-500/10 border border-warning-500/20 text-warning-400 text-sm">
+                  Nenhum lote com saldo disponível para este produto/tamanho.
+                </div>
+              ) : (
+                <div className="space-y-2 mt-1">
+                  {lotesDisponiveis.map((lote) => (
+                    <button
+                      key={lote.id}
+                      type="button"
+                      onClick={() => setForm({ ...form, stock_entry_id: lote.id })}
+                      className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border text-sm transition-all ${
+                        form.stock_entry_id === lote.id
+                          ? 'bg-brand-600/20 border-brand-500/50 text-brand-300'
+                          : 'bg-dark-800/40 border-dark-700/30 text-dark-300 hover:bg-dark-700/40'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="font-mono text-xs bg-dark-700/80 px-2 py-0.5 rounded text-brand-400">
+                          {loteCode(lote.id)}
+                        </span>
+                        <span className="text-dark-400 text-xs">
+                          {format(new Date(lote.created_at), 'dd/MM/yyyy')}
+                        </span>
+                        <span className="text-dark-300">
+                          Custo: {formatCurrency(lote.custo_unitario)}/un
+                        </span>
+                      </div>
+                      <span className={`font-bold ${lote.remaining_quantity < 5 ? 'text-warning-400' : 'text-success-400'}`}>
+                        {lote.remaining_quantity} un. disponíveis
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 4. Quantidade + Preço + Desconto */}
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="input-label">Quantidade *</label>
@@ -350,7 +413,7 @@ export const Sales: React.FC = () => {
             </div>
           </div>
 
-          {/* Frete */}
+          {/* 5. Frete */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="input-label">Frete Cobrado do Cliente (R$)</label>
@@ -373,15 +436,8 @@ export const Sales: React.FC = () => {
               />
             </div>
           </div>
-          {(parsedFreteCobrado > 0 || parsedFreteCusto > 0) && (
-            <div className="p-3 rounded-xl bg-brand-500/10 border border-brand-500/20 flex items-center justify-between text-sm">
-              <span className="text-dark-400">Lucro do frete:</span>
-              <span className={`font-semibold ${parsedLucroFrete >= 0 ? 'text-success-400' : 'text-danger-400'}`}>
-                {formatCurrency(parsedLucroFrete)}
-              </span>
-            </div>
-          )}
 
+          {/* 6. Cliente */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="input-label">Nome do Cliente</label>
@@ -405,6 +461,7 @@ export const Sales: React.FC = () => {
             </div>
           </div>
 
+          {/* 7. Pagamento */}
           <div>
             <label className="input-label">Forma de Pagamento *</label>
             <select
@@ -413,28 +470,35 @@ export const Sales: React.FC = () => {
               className="select-field"
             >
               {PAYMENT_METHODS.map((p) => (
-                <option key={p.value} value={p.value}>
-                  {p.label}
-                </option>
+                <option key={p.value} value={p.value}>{p.label}</option>
               ))}
             </select>
           </div>
 
-          {saleTotal > 0 && (
-            <div className="p-4 rounded-xl bg-success-500/10 border border-success-500/20">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-dark-400">Total da venda</p>
-                  <p className="text-2xl font-bold text-success-400">
-                    {formatCurrency(saleTotal)}
-                  </p>
+          {/* 8. Resumo financeiro */}
+          {saleTotal > 0 && loteAtual && (
+            <div className="p-4 rounded-xl bg-dark-800/60 border border-dark-700/30 space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-dark-400">Total da venda</span>
+                <span className="font-bold text-success-400">{formatCurrency(saleTotal)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-dark-400">Custo do lote ({parsedQty} × {formatCurrency(loteAtual.custo_unitario)})</span>
+                <span className="text-danger-400">-{formatCurrency(custoPrevisto)}</span>
+              </div>
+              {(parsedFreteCobrado > 0 || parsedFreteCusto > 0) && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-dark-400">Lucro do frete</span>
+                  <span className={parsedLucroFrete >= 0 ? 'text-success-400' : 'text-danger-400'}>
+                    {formatCurrency(parsedLucroFrete)}
+                  </span>
                 </div>
-                {parsedDiscount > 0 && (
-                  <div className="text-right">
-                    <p className="text-xs text-dark-500">Subtotal: {formatCurrency(parsedQty * parsedPrice)}</p>
-                    <p className="text-xs text-danger-400">Desconto: -{formatCurrency(parsedDiscount)}</p>
-                  </div>
-                )}
+              )}
+              <div className="border-t border-dark-700/30 pt-2 flex justify-between">
+                <span className="text-dark-300 font-semibold">Lucro estimado</span>
+                <span className={`font-bold text-lg ${lucroPrevisto >= 0 ? 'text-success-400' : 'text-danger-400'}`}>
+                  {formatCurrency(lucroPrevisto)}
+                </span>
               </div>
             </div>
           )}
@@ -444,7 +508,7 @@ export const Sales: React.FC = () => {
               Cancelar
             </button>
             <button type="submit" className="btn-success" disabled={saving}>
-              {saving ? 'Processando...' : (editingId ? 'Salvar Alterações' : 'Confirmar Venda')}
+              {saving ? 'Processando...' : editingId ? 'Salvar Alterações' : 'Confirmar Venda'}
             </button>
           </div>
         </form>
@@ -455,7 +519,7 @@ export const Sales: React.FC = () => {
         onClose={() => setDeleteId(null)}
         onConfirm={handleDelete}
         title="Excluir Venda"
-        message="O estoque será restaurado automaticamente. Deseja continuar?"
+        message="O saldo do lote será restaurado automaticamente. Deseja continuar?"
         confirmText="Excluir"
       />
     </div>
