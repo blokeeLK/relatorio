@@ -11,6 +11,7 @@ import { PageLoading } from '@/components/LoadingSpinner'
 import type { SaleFormData, Size } from '@/types'
 import { SIZES, PAYMENT_METHODS, SALE_STATUSES } from '@/types'
 import { stockService } from '@/services/stockService'
+import { friendlySupabaseError } from '@/lib/supabase'
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
@@ -90,7 +91,7 @@ export const Sales: React.FC = () => {
       setModalOpen(false)
       setForm(emptySaleForm)
     } catch (err) {
-      setError((err as Error).message)
+      setError(friendlySupabaseError(err))
     } finally {
       setSaving(false)
     }

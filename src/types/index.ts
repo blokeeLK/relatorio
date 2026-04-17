@@ -47,6 +47,7 @@ export interface Product {
   nome: string
   modelo: string
   cor: string
+  sku?: string
   created_at: string
 }
 

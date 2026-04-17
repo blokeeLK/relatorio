@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { PageLoading } from '@/components/LoadingSpinner'
 import type { StockEntryFormData, Size } from '@/types'
 import { SIZES } from '@/types'
+import { friendlySupabaseError } from '@/lib/supabase'
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
@@ -54,7 +55,7 @@ export const StockEntries: React.FC = () => {
       setModalOpen(false)
       setForm(emptyForm)
     } catch (err) {
-      setError((err as Error).message)
+      setError(friendlySupabaseError(err))
     } finally {
       setSaving(false)
     }
