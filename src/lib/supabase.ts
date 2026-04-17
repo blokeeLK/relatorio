@@ -20,11 +20,20 @@ export function friendlySupabaseError(err: unknown): string {
   const code = (pgErr as { code?: string })?.code || ''
 
   // Schema cache desatualizado ou tabela/coluna inexistente
-  if (/schema cache/i.test(msg) || code === 'PGRST205' || code === 'PGRST204') {
-    const match = msg.match(/['"`]?public\.(\w+)['"`]?/i) || msg.match(/column ['"`]?(\w+)['"`]?/i)
-    const target = match ? match[1] : 'tabela/coluna'
+  // Cobre: PGRST204 (coluna não existe), PGRST205 (relacionamento), mensagens de schema cache
+  if (/schema cache/i.test(msg) || /does not exist/i.test(msg) || code === 'PGRST205' || code === 'PGRST204') {
+    // Tenta extrair: public.tabela  OU  column "nome_coluna"  OU  relation "tabela"
+    const tableMatch = msg.match(/public\.(\w+)/i)
+    const columnMatch = msg.match(/column ["'`]([a-z_][a-z0-9_]*)["'`]/i)
+    const relationMatch = msg.match(/relation ["'`]([a-z_][a-z0-9_]*)["'`]/i)
+
+    let target = 'tabela/coluna'
+    if (columnMatch) target = `coluna "${columnMatch[1]}"`
+    else if (tableMatch) target = `tabela "${tableMatch[1]}"`
+    else if (relationMatch) target = `tabela "${relationMatch[1]}"`
+
     return (
-      `Banco de dados desatualizado: "${target}" não foi encontrado. ` +
+      `Banco de dados desatualizado: ${target} não foi encontrada. ` +
       `Abra o Supabase → SQL Editor → rode o arquivo RODAR_NO_SUPABASE.sql do repositório ` +
       `e depois recarregue a página (Ctrl+F5).`
     )
