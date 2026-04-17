@@ -7,7 +7,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { PageLoading } from '@/components/LoadingSpinner'
 import type { ProductFormData } from '@/types'
 
-const emptyForm: ProductFormData = { nome: '', modelo: '', cor: '', sku: '' }
+const emptyForm: ProductFormData = { nome: '', modelo: '', cor: '' }
 
 export const Products: React.FC = () => {
   const { products, loading, fetchProducts, addProduct, updateProduct, deleteProduct, searchProducts } = useProductStore()
@@ -39,7 +39,7 @@ export const Products: React.FC = () => {
 
   const openEdit = (product: typeof products[0]) => {
     setEditingId(product.id)
-    setForm({ nome: product.nome, modelo: product.modelo, cor: product.cor, sku: product.sku })
+    setForm({ nome: product.nome, modelo: product.modelo, cor: product.cor })
     setError(null)
     setModalOpen(true)
   }
@@ -109,7 +109,7 @@ export const Products: React.FC = () => {
                 <th>Produto</th>
                 <th>Modelo</th>
                 <th>Cor</th>
-                <th>SKU</th>
+                <th>Modelo/Cor</th>
                 <th className="text-right">Ações</th>
               </tr>
             </thead>
@@ -133,9 +133,9 @@ export const Products: React.FC = () => {
                     )}
                   </td>
                   <td>
-                    <code className="text-xs bg-dark-800/60 px-2 py-1 rounded font-mono text-dark-300">
-                      {product.sku || '—'}
-                    </code>
+                    <span className="text-xs text-dark-400">
+                      {[product.modelo, product.cor].filter(Boolean).join(' • ') || '—'}
+                    </span>
                   </td>
                   <td>
                     <div className="flex items-center justify-end gap-1">
@@ -219,17 +219,6 @@ export const Products: React.FC = () => {
                 placeholder="Ex: Branco"
               />
             </div>
-          </div>
-
-          <div>
-            <label className="input-label">SKU</label>
-            <input
-              type="text"
-              value={form.sku}
-              onChange={(e) => setForm({ ...form, sku: e.target.value })}
-              className="input-field"
-              placeholder="Ex: CAM-BAS-BRA-001"
-            />
           </div>
 
           <div className="flex justify-end gap-3 pt-2">

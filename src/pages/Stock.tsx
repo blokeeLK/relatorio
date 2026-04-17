@@ -26,8 +26,8 @@ export const Stock: React.FC = () => {
     })
     // Sort sizes within each group
     Object.values(map).forEach((group) => {
-      const order = ['P', 'M', 'G', 'GG']
-      group.sizes.sort((a, b) => order.indexOf(a.size) - order.indexOf(b.size))
+      const order = ['P', 'M', 'G', 'GG', 'G1', 'G2', 'G3']
+      group.sizes.sort((a, b) => order.indexOf(a.tamanho) - order.indexOf(b.tamanho))
     })
     return Object.values(map)
   }, [stock])
@@ -47,9 +47,8 @@ export const Stock: React.FC = () => {
       {grouped.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {grouped.map(({ product, sizes }) => {
-            const totalQty = sizes.reduce((sum, s) => sum + s.quantity, 0)
-            const productValue = sizes.reduce((sum, s) => sum + s.quantity * s.average_cost, 0)
-            const hasLowStock = sizes.some((s) => s.quantity > 0 && s.quantity < 10)
+            const totalQty = sizes.reduce((sum, s) => sum + s.quantidade, 0)
+            const hasLowStock = sizes.some((s) => s.quantidade > 0 && s.quantidade < 10)
 
             return (
               <div
@@ -64,7 +63,7 @@ export const Stock: React.FC = () => {
                       {product.nome}
                     </h3>
                     <p className="text-xs text-dark-500 mt-0.5">
-                      {[product.modelo, product.cor].filter(Boolean).join(' • ') || product.sku}
+                      {[product.modelo, product.cor].filter(Boolean).join(' • ') || '—'}
                     </p>
                   </div>
                   {hasLowStock && (
@@ -80,29 +79,26 @@ export const Stock: React.FC = () => {
                     <div
                       key={s.id}
                       className={`text-center p-2.5 rounded-xl border transition-all ${
-                        s.quantity === 0
+                        s.quantidade === 0
                           ? 'bg-dark-800/30 border-dark-700/20 opacity-40'
-                          : s.quantity < 10
+                          : s.quantidade < 10
                           ? 'bg-warning-500/8 border-warning-500/20'
                           : 'bg-dark-800/40 border-dark-700/30'
                       }`}
                     >
                       <p className="text-[10px] font-bold text-dark-500 uppercase mb-0.5">
-                        {s.size}
+                        {s.tamanho}
                       </p>
                       <p
                         className={`text-lg font-bold ${
-                          s.quantity === 0
+                          s.quantidade === 0
                             ? 'text-dark-600'
-                            : s.quantity < 10
+                            : s.quantidade < 10
                             ? 'text-warning-400'
                             : 'text-dark-200'
                         }`}
                       >
-                        {s.quantity}
-                      </p>
-                      <p className="text-[10px] text-dark-500">
-                        {formatCurrency(s.average_cost)}
+                        {s.quantidade}
                       </p>
                     </div>
                   ))}
@@ -113,10 +109,6 @@ export const Stock: React.FC = () => {
                   <div>
                     <p className="text-[10px] text-dark-500 uppercase font-medium">Total</p>
                     <p className="text-sm font-bold text-dark-200">{totalQty} un.</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[10px] text-dark-500 uppercase font-medium">Valor</p>
-                    <p className="text-sm font-bold text-brand-400">{formatCurrency(productValue)}</p>
                   </div>
                 </div>
               </div>

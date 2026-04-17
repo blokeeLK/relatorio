@@ -7,7 +7,7 @@ export const stockService = {
     const { data, error } = await supabase
       .from('stock')
       .select('*, products(*)')
-      .order('quantity', { ascending: true })
+      .order('quantidade', { ascending: true })
 
     if (error) throw error
     return (data || []) as StockWithProduct[]
@@ -28,7 +28,7 @@ export const stockService = {
       .from('stock')
       .select('*')
       .eq('product_id', productId)
-      .eq('size', size)
+      .eq('tamanho', size)
       .single()
 
     if (error && error.code !== 'PGRST116') throw error
@@ -39,9 +39,9 @@ export const stockService = {
     const { data, error } = await supabase
       .from('stock')
       .select('*, products(*)')
-      .lt('quantity', threshold)
-      .gt('quantity', 0)
-      .order('quantity', { ascending: true })
+      .lt('quantidade', threshold)
+      .gt('quantidade', 0)
+      .order('quantidade', { ascending: true })
 
     if (error) throw error
     return (data || []) as StockWithProduct[]
@@ -50,9 +50,8 @@ export const stockService = {
   async initializeStockForProduct(productId: string): Promise<void> {
     const stockEntries = SIZES.map(size => ({
       product_id: productId,
-      size,
-      quantity: 0,
-      average_cost: 0,
+      tamanho: size,
+      quantidade: 0,
     }))
 
     const { error } = await supabase
@@ -64,13 +63,17 @@ export const stockService = {
 
   async addEntry(entry: StockEntryFormData): Promise<StockEntry> {
     // 1. Register the entry in stock_entries history
+    const quantidade = Number(entry.quantidade)
+    const custo_unitario = Number(entry.custo_unitario)
+
     const { data: entryData, error: entryError } = await supabase
       .from('stock_entries')
       .insert({
         product_id: entry.product_id,
-        size: entry.size,
-        quantity: entry.quantity,
-        unit_cost: entry.unit_cost,
+        tamanho: entry.tamanho,
+        quantidade,
+        custo_unitario,
+        remaining_quantity: quantidade,
       })
       .select()
       .single()
@@ -82,25 +85,19 @@ export const stockService = {
       .from('stock')
       .select('*')
       .eq('product_id', entry.product_id)
-      .eq('size', entry.size)
+      .eq('tamanho', entry.tamanho)
       .single()
 
     if (stockError && stockError.code !== 'PGRST116') throw stockError
 
     if (currentStock) {
-      // 3. Calculate weighted average cost
-      const currentTotal = currentStock.quantity * currentStock.average_cost
-      const newTotal = entry.quantity * entry.unit_cost
-      const totalQuantity = currentStock.quantity + entry.quantity
-      const newAverageCost = totalQuantity > 0 ? (currentTotal + newTotal) / totalQuantity : entry.unit_cost
+      // 3. Update stock quantity
+      const totalQuantidade = (currentStock.quantidade ?? 0) + quantidade
 
       // 4. Update stock
       const { error: updateError } = await supabase
         .from('stock')
-        .update({
-          quantity: totalQuantity,
-          average_cost: Math.round(newAverageCost * 100) / 100,
-        })
+        .update({ quantidade: totalQuantidade })
         .eq('id', currentStock.id)
 
       if (updateError) throw updateError
@@ -110,9 +107,8 @@ export const stockService = {
         .from('stock')
         .insert({
           product_id: entry.product_id,
-          size: entry.size,
-          quantity: entry.quantity,
-          average_cost: entry.unit_cost,
+          tamanho: entry.tamanho,
+          quantidade,
         })
 
       if (insertError) throw insertError
@@ -134,9 +130,9 @@ export const stockService = {
   async getTotalStockValue(): Promise<number> {
     const { data, error } = await supabase
       .from('stock')
-      .select('quantity, average_cost')
+      .select('quantidade')
 
     if (error) throw error
-    return (data || []).reduce((total, item) => total + (item.quantity * item.average_cost), 0)
+    return (data || []).reduce((total, item) => total + (item.quantidade ?? 0), 0)
   },
 }

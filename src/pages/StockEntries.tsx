@@ -14,9 +14,9 @@ const formatCurrency = (value: number) =>
 
 const emptyForm: StockEntryFormData = {
   product_id: '',
-  size: 'M',
-  quantity: 1,
-  unit_cost: 0,
+  tamanho: 'M',
+  quantidade: '',
+  custo_unitario: '',
 }
 
 export const StockEntries: React.FC = () => {
@@ -38,11 +38,11 @@ export const StockEntries: React.FC = () => {
       setError('Selecione um produto')
       return
     }
-    if (form.quantity <= 0) {
+    if (Number(form.quantidade) <= 0) {
       setError('Quantidade deve ser maior que zero')
       return
     }
-    if (form.unit_cost <= 0) {
+    if (Number(form.custo_unitario) <= 0) {
       setError('Custo unitário deve ser maior que zero')
       return
     }
@@ -94,12 +94,12 @@ export const StockEntries: React.FC = () => {
                     {entry.products?.nome || '—'}
                   </td>
                   <td>
-                    <span className="size-badge-active">{entry.size}</span>
+                    <span className="size-badge-active">{entry.tamanho}</span>
                   </td>
-                  <td className="font-semibold text-success-400">+{entry.quantity}</td>
-                  <td>{formatCurrency(entry.unit_cost)}</td>
+                  <td className="font-semibold text-success-400">+{entry.quantidade}</td>
+                  <td>{formatCurrency(entry.custo_unitario)}</td>
                   <td className="font-semibold text-dark-200">
-                    {formatCurrency(entry.quantity * entry.unit_cost)}
+                    {formatCurrency(entry.quantidade * entry.custo_unitario)}
                   </td>
                   <td className="text-dark-400 text-xs">
                     {format(new Date(entry.created_at), 'dd/MM/yyyy HH:mm')}
@@ -159,9 +159,9 @@ export const StockEntries: React.FC = () => {
                 <button
                   key={size}
                   type="button"
-                  onClick={() => setForm({ ...form, size: size as Size })}
-                  className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${
-                    form.size === size
+                  onClick={() => setForm({ ...form, tamanho: size as Size })}
+                  className={`px-3 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${
+                    form.tamanho === size
                       ? 'bg-brand-600 text-white shadow-md shadow-brand-600/20'
                       : 'bg-dark-800/60 text-dark-400 border border-dark-700/50 hover:bg-dark-700/60'
                   }`}
@@ -176,32 +176,30 @@ export const StockEntries: React.FC = () => {
             <div>
               <label className="input-label">Quantidade *</label>
               <input
-                type="number"
-                min="1"
-                value={form.quantity}
-                onChange={(e) => setForm({ ...form, quantity: parseInt(e.target.value) || 0 })}
+                type="text"
+                value={form.quantidade}
+                onChange={(e) => setForm({ ...form, quantidade: e.target.value })}
                 className="input-field"
+                placeholder="Ex: 10"
               />
             </div>
             <div>
               <label className="input-label">Custo Unitário (R$) *</label>
               <input
-                type="number"
-                min="0.01"
-                step="0.01"
-                value={form.unit_cost || ''}
-                onChange={(e) => setForm({ ...form, unit_cost: parseFloat(e.target.value) || 0 })}
+                type="text"
+                value={form.custo_unitario}
+                onChange={(e) => setForm({ ...form, custo_unitario: e.target.value })}
                 className="input-field"
-                placeholder="0,00"
+                placeholder="Ex: 18,50"
               />
             </div>
           </div>
 
-          {form.quantity > 0 && form.unit_cost > 0 && (
+          {Number(form.quantidade) > 0 && Number(form.custo_unitario) > 0 && (
             <div className="p-3 rounded-xl bg-brand-600/10 border border-brand-500/20">
               <p className="text-xs text-dark-400">Total da entrada</p>
               <p className="text-lg font-bold text-brand-400">
-                {formatCurrency(form.quantity * form.unit_cost)}
+                {formatCurrency(Number(form.quantidade) * Number(form.custo_unitario))}
               </p>
             </div>
           )}

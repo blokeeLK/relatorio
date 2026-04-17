@@ -72,11 +72,11 @@ export const Reports: React.FC = () => {
   }, [getDateRange])
 
   const metrics = useMemo(() => {
-    const totalRevenue = sales.reduce((sum, s) => sum + s.quantity * s.unit_price - s.discount, 0)
+    const totalRevenue = sales.reduce((sum, s) => sum + s.quantidade * s.preco_venda - s.desconto, 0)
     const totalExpenses = expenses.reduce((sum, e) => sum + e.value, 0)
     const totalProfit = totalRevenue - totalExpenses
     const avgTicket = sales.length > 0 ? totalRevenue / sales.length : 0
-    const totalItems = sales.reduce((sum, s) => sum + s.quantity, 0)
+    const totalItems = sales.reduce((sum, s) => sum + s.quantidade, 0)
 
     // Group expenses by category
     const expensesByCategory = expenses.reduce((acc, e) => {
@@ -86,7 +86,7 @@ export const Reports: React.FC = () => {
 
     // Group sales by payment method
     const salesByPayment = sales.reduce((acc, s) => {
-      const revenue = s.quantity * s.unit_price - s.discount
+      const revenue = s.quantidade * s.preco_venda - s.desconto
       acc[s.payment_method] = (acc[s.payment_method] || 0) + revenue
       return acc
     }, {} as Record<string, number>)
@@ -250,11 +250,11 @@ export const Reports: React.FC = () => {
                       {format(new Date(sale.created_at), 'dd/MM/yy HH:mm')}
                     </td>
                     <td className="px-4 py-3 text-sm text-dark-200 font-medium">{sale.products?.nome}</td>
-                    <td className="px-4 py-3"><span className="size-badge-active text-xs">{sale.size}</span></td>
-                    <td className="px-4 py-3 text-sm">{sale.quantity}</td>
+                    <td className="px-4 py-3"><span className="size-badge-active text-xs">{sale.tamanho}</span></td>
+                    <td className="px-4 py-3 text-sm">{sale.quantidade}</td>
                     <td className="px-4 py-3 text-sm text-dark-300">{sale.customer_name || '—'}</td>
                     <td className="px-4 py-3 text-sm font-bold text-success-400 text-right">
-                      {formatCurrency(sale.quantity * sale.unit_price - sale.discount)}
+                      {formatCurrency(sale.quantidade * sale.preco_venda - sale.desconto)}
                     </td>
                   </tr>
                 ))}
